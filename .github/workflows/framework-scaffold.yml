@@ -42,7 +42,7 @@ jobs:
         shell: Rscript {0}
         run: |
           install.packages("pak")
-          pak::pak(c("frameworktools/framework@0f12d4155e03966a019b7edb24ab4dd49ed6573c", "renv"))
+          pak::pak(c("frameworktools/framework@76a587f92c08ada9b7d81d61d0514c91bb216300", "renv"))
 
       - name: Scaffold
         if: steps.layers.outputs.present == 'true'
