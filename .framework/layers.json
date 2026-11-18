@@ -130,10 +130,7 @@
             "version": 1,
             "layer": {
                 "skills": {
-                    "ggplot2-exploring": {
-                        "package": true
-                    },
-                    "ggplot2-publishing": {
+                    "ggplot2-figures": {
                         "package": true
                     }
                 },
@@ -421,8 +418,7 @@
                     "framework-outputs": null,
                     "framework-packages": null,
                     "framework-publishing": null,
-                    "framework-workflow": null,
-                    "ggplot2-figures": null
+                    "framework-workflow": null
                 }
             }
         },
