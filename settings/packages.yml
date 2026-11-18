@@ -1,0 +1,30 @@
+packages:
+  use_renv: false
+  default_packages:
+  - name: dplyr
+    source: cran
+    auto_attach: true
+  - name: ggplot2
+    source: cran
+    auto_attach: true
+  - name: tidyr
+    source: cran
+    auto_attach: true
+  - name: stringr
+    source: cran
+    auto_attach: true
+  - name: readr
+    source: cran
+    auto_attach: true
+  - name: purrr
+    source: cran
+    auto_attach: false
+  - name: tibble
+    source: cran
+    auto_attach: true
+  - name: forcats
+    source: cran
+    auto_attach: true
+  - name: lubridate
+    source: cran
+    auto_attach: false

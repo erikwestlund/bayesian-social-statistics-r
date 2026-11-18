@@ -1,0 +1,87 @@
+{
+  "schema": 1,
+  "skills": {
+    "package:framework-sensitive-data": {
+      "paths": [
+        ".agents/skills/framework-sensitive-data"
+      ],
+      "variant": "r",
+      "hash": "4528364c618ccf5b3c88dc9d2f871d9cf4f833b16b6e18800e99bf713c44b332",
+      "origin": {
+        "skill_id": "framework:framework-sensitive-data",
+        "hash": "4528364c618ccf5b3c88dc9d2f871d9cf4f833b16b6e18800e99bf713c44b332"
+      }
+    },
+    "package:ggplot2-figures": {
+      "paths": [
+        ".agents/skills/ggplot2-figures"
+      ],
+      "variant": "r",
+      "hash": "e6e5d6bad77dbaa27e8b18b07a1caec6606722967dfcbd2c10c4c160f9da29df",
+      "origin": {
+        "skill_id": "framework:ggplot2-figures",
+        "hash": "e6e5d6bad77dbaa27e8b18b07a1caec6606722967dfcbd2c10c4c160f9da29df"
+      }
+    },
+    "account:https://framework.pub:framework:writing:r": {
+      "paths": [
+        ".agents/skills/writing"
+      ],
+      "variant": "r",
+      "hash": "35bdad3e6d075995d448cda830afd2c46585a2e60c9b8c31f837bb6c461216bc",
+      "server": "https://framework.pub",
+      "version": 3,
+      "skill_id": "framework:writing"
+    },
+    "account:https://framework.pub:framework:identifiable-data:r": {
+      "paths": [
+        ".agents/skills/identifiable-data"
+      ],
+      "variant": "r",
+      "hash": "bef78777807237b35efb14096e51fd11b939f5ea8dfb08170507eb4938c87341",
+      "server": "https://framework.pub",
+      "version": 1,
+      "skill_id": "framework:identifiable-data"
+    },
+    "account:https://framework.pub:framework:checking-data:r": {
+      "paths": [
+        ".agents/skills/checking-data"
+      ],
+      "variant": "r",
+      "hash": "80754dc65931d80437aa1a614fc9b376693191e5d41368260d087e2c76f1f50a",
+      "server": "https://framework.pub",
+      "version": 1,
+      "skill_id": "framework:checking-data"
+    },
+    "account:https://framework.pub:framework:cleaning-data:r": {
+      "paths": [
+        ".agents/skills/cleaning-data"
+      ],
+      "variant": "r",
+      "hash": "e61bfc90b137c45c25dbc7bc75eba9018c0df014e877d438855c0d4ff73b1656",
+      "server": "https://framework.pub",
+      "version": 1,
+      "skill_id": "framework:cleaning-data"
+    },
+    "account:https://framework.pub:framework:git-workflow:r": {
+      "paths": [
+        ".agents/skills/git-workflow"
+      ],
+      "variant": "r",
+      "hash": "d71d04d66af2f049f5a37319cf654e23f5ea0d938da1606642a153ef761debb8",
+      "server": "https://framework.pub",
+      "version": 1,
+      "skill_id": "framework:git-workflow"
+    },
+    "account:https://framework.pub:framework:quarto-documents:r": {
+      "paths": [
+        ".agents/skills/quarto-documents"
+      ],
+      "variant": "r",
+      "hash": "950ac20ed1541d246331352d2ac1228461d95b762409e923dd684164f7c52d6b",
+      "server": "https://framework.pub",
+      "version": 1,
+      "skill_id": "framework:quarto-documents"
+    }
+  }
+}

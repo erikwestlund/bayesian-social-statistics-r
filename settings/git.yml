@@ -1,0 +1,8 @@
+git:
+  enabled: true
+  user_name: ''
+  user_email: ''
+  hooks:
+    data_security: true
+    check_sensitive_dirs: true
+    check_notebook_outputs: false
