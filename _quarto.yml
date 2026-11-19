@@ -5,6 +5,7 @@
 project:
   type: default
   output-dir: outputs/private
+  execute-dir: project
 
 format:
   html:

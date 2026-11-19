@@ -1,0 +1,530 @@
+---
+title: "HSLS:09 descriptives"
+author:
+  - name: "Erik"
+    email: "ewestlund@jhu.edu"
+    url: "https://erik-westlund.academic.page"
+    affiliations:
+      - name: "Johns Hopkins Bloomberg School of Public Health"
+        department: "Department of Biostatistics"
+        city: "Baltimore"
+        country: "United States"
+date: "2026-11-18"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    code-fold: false
+    df-print: kable
+execute:
+  echo: true
+  warning: true
+  message: true
+  cache: false
+---
+
+This notebook describes the cleaned HSLS:09 file before any model uses it: each
+variable's type, summary statistics, and distribution, then its missing values,
+why they are missing, and how they occur together. `docs/codebook.md` lists every
+value and reserve code. `docs/missing-data.md` explains the codes.
+
+Counts are unweighted. Means and percentages are given both unweighted, over the
+students in the file, and weighted to the population of 9th graders in fall 2009.
+
+The notebook reads private data, so it renders to `outputs/private/notebooks`.
+It shows summaries only, never individual records.
+
+```{r}
+#| label: setup
+#| message: false
+
+library(framework)
+scaffold()
+
+theme_set(theme_minimal(base_size = 11))
+okabe_ito <- c(blue = "#0072B2", orange = "#E69F00", green = "#009E73")
+
+# Read every cell as text and keep empty cells as "", not NA
+crosswalk <- data_read(
+  "inputs.public.raw.hsls_crosswalk",
+  col_types = readr::cols(.default = "c"),
+  na = character()
+)
+clean <- data_read(
+  "inputs.private.final.hsls_clean",
+  col_types = readr::cols(student_id = "c", .default = "d")
+)
+raw <- data_read(
+  "inputs.private.raw.hsls_student",
+  col_select = unique(crosswalk$nces),
+  col_types = readr::cols(STU_ID = "c", .default = "d")
+)
+
+# Missing-value reasons compare raw and clean values row by row
+stopifnot(identical(raw$STU_ID, clean$student_id))
+reasons <- missing_reasons(raw, clean, crosswalk)
+labels <- setNames(crosswalk$label, crosswalk$name)
+waves <- setNames(crosswalk$wave, crosswalk$name)
+sprintf("%s students, %d variables", format(nrow(clean), big.mark = ","), ncol(clean))
+```
+
+## Variables
+
+Each variable's type comes from the crosswalk. The stored type is how the file
+holds it: every variable except the student ID is numeric, and categories are
+codes with labels in the crosswalk.
+
+```{r}
+#| label: tbl-variables
+
+tibble(
+  Variable = crosswalk$name,
+  Label = crosswalk$label,
+  Wave = crosswalk$wave,
+  Type = crosswalk$type,
+  `Stored as` = vapply(clean[crosswalk$name], \(x) class(x)[1], ""),
+  `Distinct values` = vapply(clean[crosswalk$name], \(x) n_distinct(x, na.rm = TRUE), 0L),
+  Observed = colSums(!is.na(clean[crosswalk$name])),
+  `Missing (%)` = round(colMeans(is.na(clean[crosswalk$name])) * 100, 1)
+)
+```
+
+## Sample
+
+HSLS:09 sampled 23,503 9th graders in fall 2009. A weight above 0 marks a
+student who counts toward estimates with that weight: the base-year student
+weight needs a base-year student survey, the parent weight a parent survey, and
+the panel weight both student surveys.
+
+```{r}
+#| label: tbl-sample
+
+flags <- c("w1_responded", "w1_parent_responded", "w2_responded")
+weights <- c("w1_weight", "w1_weight_parent", "w2_weight_panel")
+tibble(
+  Rule = c(paste(flags, "= 1"), paste(weights, "> 0")),
+  Label = labels[c(flags, weights)],
+  Students = c(
+    vapply(flags, \(name) sum(clean[[name]] == 1, na.rm = TRUE), 0L),
+    vapply(weights, \(name) sum(clean[[name]] > 0, na.rm = TRUE), 0L)
+  )
+) |>
+  mutate(`Share (%)` = round(Students / nrow(clean) * 100, 1))
+```
+
+```{r}
+#| label: tbl-responses
+
+# Who answered which survey. Missing means the response status itself is unknown.
+base_year <- c("0" = "No base-year survey", "1" = "Base-year survey")[as.character(clean$w1_responded)]
+follow_up <- c("0" = "No follow-up survey", "1" = "Follow-up survey")[as.character(clean$w2_responded)]
+follow_up[is.na(follow_up)] <- "Status unknown"
+responses <- addmargins(table(base_year, follow_up), FUN = list(Total = sum), quiet = TRUE)
+as.data.frame.matrix(responses)
+```
+
+## Continuous variables
+
+The weighted columns use the weight that matches the variable's source: the
+base-year student weight for base-year variables, and the panel weight for the
+first follow-up math score. Weighted SDs are population SDs.
+
+```{r}
+#| label: tbl-continuous
+
+continuous <- crosswalk$name[crosswalk$type == "continuous"]
+weight_for <- setNames(ifelse(waves[continuous] == "2", "w2_weight_panel", "w1_weight"), continuous)
+
+lapply(continuous, \(name) {
+  x <- clean[[name]]
+  weighted <- weighted_mean_sd(x, clean[[weight_for[name]]])
+  quantiles <- quantile(x, c(0.05, 0.25, 0.5, 0.75, 0.95), na.rm = TRUE)
+  tibble(
+    Variable = name,
+    Observed = sum(!is.na(x)),
+    Mean = mean(x, na.rm = TRUE),
+    SD = sd(x, na.rm = TRUE),
+    Min = min(x, na.rm = TRUE),
+    `5%` = quantiles[[1]],
+    `25%` = quantiles[[2]],
+    Median = quantiles[[3]],
+    `75%` = quantiles[[4]],
+    `95%` = quantiles[[5]],
+    Max = max(x, na.rm = TRUE),
+    Weight = weight_for[[name]],
+    `Weighted mean` = weighted[["mean"]],
+    `Weighted SD` = weighted[["sd"]]
+  )
+}) |>
+  bind_rows() |>
+  mutate(across(where(is.double), \(x) round(x, 2)))
+```
+
+The math scores are T-scores, scaled by NCES to a weighted mean of 50 and SD of
+10 in each wave. SES and math self-efficacy are standardized composites, so
+their negative values are real values, not reserve codes.
+
+```{r}
+#| label: fig-continuous
+#| fig-width: 9
+#| fig-height: 6.5
+
+shown <- c("w1_math", "w2_math", "w1_math_efficacy", "w1_ses")
+values <- clean[shown] |>
+  pivot_longer(everything(), names_to = "name", values_to = "value") |>
+  filter(!is.na(value)) |>
+  add_count(name) |>
+  mutate(panel = paste0(labels[name], " (n = ", format(n, big.mark = ","), ")"))
+values$panel <- factor(values$panel, levels = unique(values$panel[order(match(values$name, shown))]))
+
+ggplot(values, aes(value)) +
+  geom_histogram(bins = 40, fill = okabe_ito[["blue"]], color = "white", linewidth = 0.2) +
+  facet_wrap(~panel, scales = "free") +
+  labs(
+    title = "Distributions of the continuous variables, observed values",
+    x = NULL,
+    y = "Students"
+  )
+```
+
+## Categorical variables
+
+Percentages are of the students with an observed value. The weighted
+percentages use the base-year student weight, or the parent weight for
+variables from the parent survey.
+
+```{r}
+#| label: tbl-categorical
+
+# The response flags are in the sample table above
+categorical <- crosswalk |>
+  filter(type %in% c("binary", "categorical", "ordinal"), !name %in% flags)
+parent_items <- categorical$name[str_detect(categorical$nces, "^(X1PAR|X1P2|X1FAM)")]
+
+value_label <- function(row, values) {
+  if (row$derive == "applies") {
+    named <- c("0" = "Logical skip in the source variable", "1" = "Answered")
+  } else {
+    named <- crosswalk_labels(row$labels)
+    if (length(named) == 0 && row$type == "binary") {
+      named <- c("0" = "No", "1" = "Yes")
+    }
+  }
+  label <- unname(named[as.character(values)])
+  ifelse(is.na(label), "", label)
+}
+
+frequencies <- lapply(seq_len(nrow(categorical)), \(i) {
+  row <- categorical[i, ]
+  x <- clean[[row$name]]
+  weight <- clean[[if (row$name %in% parent_items) "w1_weight_parent" else "w1_weight"]]
+  counts <- table(x)
+  values <- as.numeric(names(counts))
+  weighted <- tapply(weight[weight > 0 & !is.na(weight)], x[weight > 0 & !is.na(weight)], sum)
+  weighted <- weighted[names(counts)]
+  weighted[is.na(weighted)] <- 0
+  tibble(
+    Variable = row$name,
+    Value = as.integer(values),
+    Label = value_label(row, values),
+    Students = as.integer(counts),
+    Percent = round(as.numeric(counts) / sum(counts) * 100, 1),
+    `Weighted percent` = round(as.numeric(weighted) / sum(weighted) * 100, 1)
+  )
+})
+bind_rows(frequencies)
+```
+
+## Missing values by reason
+
+Each missing value has one of three reasons, from the raw NCES codes:
+
+- **Nonresponse**: the question applied and went unanswered. An analysis
+  imputes these or models them.
+- **Logical skip**: the question did not apply. An analysis of that variable
+  usually drops these students.
+- **Outside the flag**: the raw file has an answer, but the variable applies
+  only where a flag is 1, such as parent 2's employment where there is no
+  second parent.
+
+```{r}
+#| label: tbl-missing-reasons
+
+order <- c("Observed", "Nonresponse", "Logical skip", "Outside the flag")
+by_reason <- t(vapply(reasons, \(column) as.vector(table(factor(column, levels = order))), integer(4)))
+colnames(by_reason) <- order
+by_reason <- tibble(Variable = rownames(by_reason), Label = labels[rownames(by_reason)], as_tibble(by_reason))
+by_reason
+```
+
+```{r}
+#| label: fig-missing-reasons
+#| fig-width: 8
+#| fig-height: 7
+
+missing_share <- by_reason |>
+  filter(Nonresponse + `Logical skip` + `Outside the flag` > 0) |>
+  mutate(Variable = fct_reorder(Variable, Nonresponse)) |>
+  pivot_longer(all_of(order[-1]), names_to = "Reason", values_to = "Students") |>
+  mutate(
+    Percent = Students / nrow(clean) * 100,
+    Reason = factor(Reason, levels = rev(order[-1]))
+  )
+
+ggplot(missing_share, aes(Percent, Variable, fill = Reason)) +
+  geom_col(width = 0.8) +
+  scale_fill_manual(
+    values = c(Nonresponse = okabe_ito[["blue"]], `Logical skip` = okabe_ito[["orange"]], `Outside the flag` = okabe_ito[["green"]]),
+    breaks = order[-1]
+  ) +
+  labs(
+    title = "Missing values by reason, variables with any missing",
+    x = "Students (%)",
+    y = NULL,
+    fill = NULL
+  ) +
+  theme(legend.position = "inside", legend.position.inside = c(0.98, 0.02), legend.justification = c(1, 0))
+```
+
+## Missingness patterns
+
+The patterns below use the variables a first model is likely to use: the two
+math scores, SES, math self-efficacy, sex, race, parents' education, and family
+income. Each row is a combination of observed (`·`) and missing (`X`) values,
+counting a missing value for any reason.
+
+```{r}
+#| label: tbl-patterns
+
+analysis <- c(
+  "w1_math",
+  "w2_math",
+  "w1_ses",
+  "w1_math_efficacy",
+  "w1_female",
+  "w1_race",
+  "w1_parents_edu",
+  "w1_family_income"
+)
+missing <- is.na(clean[analysis])
+patterns <- as_tibble(ifelse(missing, "X", "·")) |>
+  count(across(everything()), name = "Students", sort = TRUE) |>
+  mutate(
+    Percent = round(Students / nrow(clean) * 100, 1),
+    `Missing variables` = rowSums(across(all_of(analysis), \(x) x == "X"))
+  )
+head(patterns, 15)
+```
+
+```{r}
+complete <- sum(!apply(missing, 1, any))
+cat(sprintf(
+  "%s students (%.1f%%) have all %d variables.\n",
+  format(complete, big.mark = ","), complete / nrow(clean) * 100, length(analysis)
+))
+cat(sprintf(
+  "%d distinct patterns. The 15 above cover %.1f%% of students.\n",
+  nrow(patterns), sum(head(patterns$Students, 15)) / nrow(clean) * 100
+))
+```
+
+Missing values cluster by survey. A student without a base-year survey misses
+the base-year score, SES, and self-efficacy together. A parent who did not
+respond leaves parents' education and income missing. The next table gives the
+share missing on each variable within each response group.
+
+```{r}
+#| label: tbl-missing-by-response
+
+share_missing <- function(flag) {
+  group <- ifelse(is.na(clean[[flag]]), "Unknown", ifelse(clean[[flag]] == 1, "Yes", "No"))
+  groups <- sort(unique(group))
+  table <- vapply(groups, \(g) round(colMeans(missing[group == g, , drop = FALSE]) * 100, 1), numeric(length(analysis)))
+  colnames(table) <- paste(flag, "=", groups)
+  table
+}
+
+tibble(Variable = analysis, as_tibble(do.call(cbind, lapply(flags, share_missing))))
+```
+
+```{r}
+#| label: fig-missing-together
+#| fig-width: 7.5
+#| fig-height: 6
+
+# Of students missing the row variable, the share also missing the column variable
+both <- crossprod(missing)
+conditional <- both / colSums(missing) * 100
+cells <- as.data.frame(as.table(conditional), responseName = "Percent") |>
+  rename(Missing = Var1, `Also missing` = Var2) |>
+  mutate(Missing = factor(Missing, levels = rev(analysis)))
+
+ggplot(cells, aes(`Also missing`, Missing, fill = Percent)) +
+  geom_tile() +
+  geom_text(aes(label = sprintf("%.0f", Percent), color = Percent > 60), size = 3, show.legend = FALSE) +
+  scale_fill_viridis_c(limits = c(0, 100)) +
+  scale_color_manual(values = c(`TRUE` = "black", `FALSE` = "white")) +
+  labs(
+    title = "Share missing the column variable, among students missing the row variable",
+    x = "Also missing",
+    y = "Missing"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), panel.grid = element_blank())
+```
+
+## Missingness and observed values
+
+If the students missing a value differ on what is observed, a complete-case
+analysis describes a different group than the sample. The table compares
+students with and without each outcome on base-year values that are observed
+for both groups. The standardized difference is the difference in means divided
+by the pooled SD. Values beyond about 0.1 are usually read as a meaningful
+imbalance.
+
+```{r}
+#| label: tbl-missing-compare
+
+compare <- function(missing_on, covariates) {
+  is_missing <- is.na(clean[[missing_on]])
+  table <- lapply(covariates, \(name) {
+    observed <- na.omit(clean[[name]][!is_missing])
+    absent <- na.omit(clean[[name]][is_missing])
+    pooled <- sqrt((var(observed) + var(absent)) / 2)
+    tibble(
+      Variable = name,
+      observed = mean(observed),
+      missing = mean(absent),
+      difference = (mean(absent) - mean(observed)) / pooled,
+      n = length(absent)
+    )
+  }) |>
+    bind_rows() |>
+    mutate(across(observed:difference, \(x) round(x, 2)))
+  names(table) <- c(
+    "Variable",
+    paste0("Mean, ", missing_on, " observed"),
+    paste0("Mean, ", missing_on, " missing"),
+    "Standardized difference",
+    "n missing with a value"
+  )
+  table
+}
+
+compare("w2_math", c("w1_math", "w1_ses", "w1_math_efficacy", "w1_female", "w1_parents_edu"))
+compare("w1_parents_edu", c("w1_math", "w1_math_efficacy", "w1_female"))
+```
+
+```{r}
+#| label: fig-math-by-follow-up
+#| fig-width: 7
+#| fig-height: 4
+
+scores <- tibble(
+  w1_math = clean$w1_math,
+  group = factor(
+    ifelse(is.na(clean$w2_math), "Follow-up score missing", "Follow-up score observed"),
+    levels = c("Follow-up score observed", "Follow-up score missing")
+  )
+) |>
+  filter(!is.na(w1_math))
+
+ggplot(scores, aes(w1_math, color = group)) +
+  geom_density() +
+  scale_color_manual(values = unname(okabe_ito[c("blue", "orange")])) +
+  labs(
+    title = "Base-year math score by whether the follow-up score is observed",
+    x = labels[["w1_math"]],
+    y = "Density",
+    color = NULL
+  )
+```
+
+## Relationships
+
+Correlations use all students with both values, so each pair can rest on a
+different group. The table after the matrix gives each pair's count.
+
+```{r}
+#| label: tbl-correlations
+
+related <- c("w1_math", "w2_math", "w1_math_efficacy", "w1_ses", "w1_parents_edu", "w1_family_income")
+as.data.frame(round(cor(clean[related], use = "pairwise.complete.obs"), 2))
+observed <- !is.na(clean[related])
+as.data.frame(crossprod(observed))
+```
+
+```{r}
+#| label: fig-math-waves
+#| fig-width: 6
+#| fig-height: 5.5
+
+pair <- clean |>
+  select(w1_math, w2_math) |>
+  filter(!is.na(w1_math), !is.na(w2_math))
+
+ggplot(pair, aes(w1_math, w2_math)) +
+  geom_bin_2d(bins = 45) +
+  scale_fill_viridis_c() +
+  labs(
+    title = paste0("Math scores in the two waves (n = ", format(nrow(pair), big.mark = ","), ")"),
+    x = labels[["w1_math"]],
+    y = labels[["w2_math"]],
+    fill = "Students"
+  )
+```
+
+## SES imputations
+
+For a student whose parent did not respond, `w1_ses` is the mean of five
+imputations. The five spread around that mean, and averaging them removes the
+spread. The table shows, by imputation status, the SD across the five
+imputations within a student, averaged over students, and the SD of `w1_ses`
+and of the first imputation.
+
+```{r}
+#| label: tbl-ses-imputations
+
+imputations <- as.matrix(clean[paste0("w1_ses_imp", 1:5)])
+status <- c(
+  "0" = "0: all components reported",
+  "1" = "1: parent did not respond",
+  "2" = "2: some components imputed"
+)[as.character(clean$w1_ses_imputed)]
+
+tibble(
+  Status = status,
+  spread = apply(imputations, 1, sd, na.rm = TRUE),
+  gap = abs(clean$w1_ses - rowMeans(imputations, na.rm = TRUE)),
+  ses = clean$w1_ses,
+  first = clean$w1_ses_imp1
+) |>
+  filter(!is.na(Status)) |>
+  group_by(Status) |>
+  summarise(
+    Students = n(),
+    `SD across imputations, mean` = mean(spread, na.rm = TRUE),
+    `Mean minus imputation mean, largest` = max(gap, na.rm = TRUE),
+    `SD of w1_ses` = sd(ses, na.rm = TRUE),
+    `SD of imputation 1` = sd(first, na.rm = TRUE)
+  ) |>
+  mutate(across(where(is.double), \(x) round(x, 3)))
+```
+
+## Summary
+
+- **Weights.** The base-year math score has a weighted mean of 50 and SD of 10,
+  as NCES scaled it. The unweighted mean is about 51, so the sample leans
+  toward higher scorers.
+- **Complete cases.** 56.2% of students have all eight analysis variables. Most
+  of the rest miss a whole survey: the base-year student survey, the parent
+  survey, or the follow-up.
+- **Who is missing.** Students without a follow-up math score scored 0.44 SD
+  lower in the base year and had SES 0.29 SD lower than students with one.
+  Students missing parents' education, nearly all because the parent did not
+  respond, scored 0.44 SD lower too. A
+  complete-case analysis drops lower-scoring, lower-SES students, so the
+  models in this series need to address missing values rather than drop them.
+- **SES.** Among students whose parent did not respond, `w1_ses` has an SD of
+  0.54, against 0.82 for a single imputation. The five imputations differ by
+  an average SD of 0.66 within a student. Treating `w1_ses` as observed
+  ignores that uncertainty.
