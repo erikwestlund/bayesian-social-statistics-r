@@ -16,8 +16,9 @@
 #
 # Both become missing values, so a flag keeps the difference. A row with
 # derive = "applies" builds a 0/1 flag from its source: 0 for a logical skip,
-# 1 for an answer, missing for nonresponse. A row with within = <flag> is
-# missing wherever that flag is not 1.
+# 1 for an answer, missing for nonresponse. A row with fill = <name>=<value>
+# takes that value wherever it is still missing and the named variable is
+# observed. A row with within = <flag> is missing wherever that flag is not 1.
 #
 # Only the listed codes become missing. Several variables, such as the SES
 # composite, have real negative values, so "negative means missing" would drop
@@ -43,7 +44,8 @@ clean <- tibble::tibble(.rows = nrow(raw))
 for (i in seq_len(nrow(crosswalk))) {
   row <- crosswalk[i, ]
   source <- raw[[row$nces]]
-  missing <- source %in% crosswalk_codes(row$missing)
+  # A blank cell is missing too, so a flag never reads it as an answer
+  missing <- source %in% crosswalk_codes(row$missing) | is.na(source)
   skipped <- source %in% crosswalk_codes(row$skip)
 
   if (row$derive == "applies") {
@@ -52,6 +54,11 @@ for (i in seq_len(nrow(crosswalk))) {
     column <- source
     column[missing | skipped] <- NA
     column <- crosswalk_recode(column, row$recode)
+  }
+
+  if (row$fill != "") {
+    fill <- strsplit(row$fill, "=", fixed = TRUE)[[1]]
+    column[is.na(column) & !is.na(clean[[fill[1]]])] <- as.numeric(fill[2])
   }
 
   if (row$within != "") {
