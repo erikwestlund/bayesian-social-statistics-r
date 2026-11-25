@@ -1,6 +1,6 @@
 # Build the analysis file from the HSLS:09 student file.
 #
-# Run from the project root:  Rscript scripts/02_clean_hsls.R
+# Run from the project root:  Rscript scripts/hsls/02_clean.R
 #
 # inputs/public/raw/hsls_crosswalk.csv drives every step: which NCES variables
 # to keep, missing-value codes, recodes, and the new names. The Python and

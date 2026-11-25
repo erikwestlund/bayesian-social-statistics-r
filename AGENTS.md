@@ -6,7 +6,7 @@ skills listed below. Edit the sections without regeneration markers freely -
 they won't be overwritten.
 
 
-This project holds restricted data. Do not read or print files in `inputs/private/`, `outputs/private/`. Work from the data dictionary and simulated data instead.
+This project uses public-use data (HSLS:09 and ELS:2002 from NCES). It is a standard Framework project, not a sensitive one. The data files and rendered outputs stay in the `private/` folders only to keep them out of git; `.gitignore` excludes them. Never print individual rows; summaries, models, and figures are fine.
 
 ## Skills
 
@@ -24,6 +24,7 @@ on a matching task.
 | `cleaning-data` | Use when transforming raw observations into analysis data, including parsing, recoding, joins, reshaping, and missing-value decisions. | `.agents/skills/cleaning-data/SKILL.md` |
 | `git-workflow` | Use when reviewing changes, committing analysis work, resolving merge conflicts, or coordinating branches in a research repository. | `.agents/skills/git-workflow/SKILL.md` |
 | `quarto-documents` | Use when creating or editing Quarto documents, including YAML options, executable cells, cross-references, citations, and rendering for R or Python. | `.agents/skills/quarto-documents/SKILL.md` |
+| `series-post` | Use when starting, building, or finishing a post in the series: build order (R/Stan/Quarto, then the StatsLab section, then the Python and Stata ports), outline notebook style, data conventions, lab matching. | `.agents/skills/series-post/SKILL.md` |
 
 ## Framework Environment <!-- @framework:regenerate -->
 
@@ -53,8 +54,8 @@ Start each notebook and script with `scaffold()`. It:
 
 ## Installed Packages <!-- @framework:regenerate -->
 
-**Auto-attached** (loaded by scaffold): dplyr, ggplot2, tidyr, stringr, readr, tibble, forcats
-**Installed** (call library() when needed): purrr, lubridate
+**Auto-attached** (loaded by scaffold): dplyr, ggplot2, tidyr, stringr, readr, tibble, forcats, brms
+**Installed** (call library() when needed): purrr, lubridate, cmdstanr, posterior, haven, dagitty, survey
 
 Add packages with `package_add("name")` or `package_add("name", auto_attach = TRUE)`.
 
@@ -88,4 +89,25 @@ describes the folders and the checks Framework runs.
 
 *Add your project-specific notes, conventions, and documentation here.*
 *This section is never modified by `ai_regenerate_context()`.*
+
+### Publishing prose
+
+Any prose that is published, anywhere, goes through Gemini 4 Neon first, at
+minimum. That covers blog posts, artifact titles and descriptions, DAG and
+figure captions, lab page text, and README text that ships. Send the exact text
+with the facts it rests on (start a child task with provider
+`antigravity_antigravity_api`, model `gemini-4-neon`), ask for a revision, a list
+of changes, and anything factually questionable, then use its revision or
+explain to Erik why not. Show Erik what Neon said. Text written after Neon's
+review goes back through Neon before it is published.
+
+### Series workflow
+
+Every post is built in three steps, in this order:
+
+1. Build in R, Stan, and Quarto, in this project. It is the source of every number in the series.
+2. Build the companion StatsLab section at lab.phpstats.org (`~/Projects/lab.phpstats.org`).
+3. When Erik says the post is final, port it to Python and Stata.
+
+The `series-post` skill has the details.
 

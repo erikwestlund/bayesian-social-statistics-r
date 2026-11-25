@@ -1,0 +1,315 @@
+---
+title: "Posterior summaries"
+author:
+  - name: "Erik"
+    email: "ewestlund@jhu.edu"
+    url: "https://erik-westlund.academic.page"
+    affiliations:
+      - name: "Johns Hopkins Bloomberg School of Public Health"
+        department: "Department of Biostatistics"
+        city: "Baltimore"
+        country: "United States"
+date: "2026-11-18"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    code-fold: false
+    df-print: kable
+execute:
+  echo: true
+  warning: true
+  message: true
+  cache: false
+---
+
+A posterior is a distribution, and the draws are a sample from it. Every
+summary in this notebook is computed the same way: do a calculation once per
+draw, then summarize the results across draws. That covers the parameters
+themselves, probabilities of statements about them, and quantities built from
+them, such as the expected score for a given student or the variance the model
+explains.
+
+The notebook checks the summaries on a simulated fit with known parameters,
+then applies them to the HSLS:09 draws saved by `05-sampling`. Run that
+notebook first.
+
+```{r}
+#| label: setup
+#| message: false
+
+library(framework)
+scaffold() # sources functions/bayes.R
+
+theme_set(theme_minimal(base_size = 11))
+okabe_ito <- unname(palette.colors(palette = "Okabe-Ito"))[c(6, 2, 4, 7, 3, 8, 5)]
+options(ggplot2.discrete.colour = okabe_ito, ggplot2.discrete.fill = okabe_ito)
+
+clean <- data_read(
+  "inputs.private.final.hsls_clean",
+  col_types = readr::cols(student_id = "c", .default = "d")
+)
+hsls <- analysis_sample(clean)
+regression <- bayes_model("regression")
+
+# The HSLS:09 draws and the settings they were sampled with, from 05-sampling
+hsls_draws <- load_model("hsls_regression_draws")
+settings <- load_model("hsls_regression_settings")
+if (settings$n != nrow(hsls)) {
+  stop("The saved draws come from a different sample. Rerun 05-sampling.")
+}
+
+# One seed for the simulated students
+set.seed(707)
+cat(sprintf(
+  "%s draws of %s\n",
+  format(nrow(hsls_draws), big.mark = ","),
+  paste(setdiff(names(hsls_draws), c("chain", "draw")), collapse = ", ")
+))
+```
+
+## Summaries of each parameter
+
+The function below gives the usual summaries for each parameter:
+
+- **Mean and median.** For a symmetric posterior they agree.
+- **SD** of the draws, the Bayesian counterpart of a standard error.
+- **Central intervals**: the 5th to 95th and 2.5th to 97.5th percentiles.
+- **Highest-density interval (HDI)**: the narrowest interval holding 95% of the
+  draws. For a symmetric, single-peaked posterior it matches the central
+  interval; for a skewed one, such as the posterior of an SD, it shifts toward
+  the mode. For a posterior with several peaks, the highest-density region can
+  be split into pieces, and a single interval does not describe it.
+
+The Monte Carlo standard error of each summary is in `06-diagnostics`, which
+has the chain structure it needs.
+
+```{r}
+#| label: summarize
+
+hdi <- function(values, level = 0.95) {
+  # Slide a window holding the given share of the sorted draws, keep the
+  # narrowest. A window from position i to i + width holds width + 1 draws.
+  ordered <- sort(values)
+  width <- ceiling(level * length(ordered)) - 1
+  lows <- ordered[seq_len(length(ordered) - width)]
+  highs <- ordered[(width + 1):length(ordered)]
+  i <- which.min(highs - lows)
+  c(lows[i], highs[i])
+}
+
+summarize <- function(posterior_draws, names = c("alpha", "beta[1]", "beta[2]", "sigma")) {
+  rows <- lapply(names, \(name) {
+    values <- posterior_draws[[name]]
+    central90 <- interval(values, 0.9)
+    central95 <- interval(values, 0.95)
+    highest <- hdi(values)
+    data.frame(
+      Mean = mean(values),
+      Median = median(values),
+      SD = sd(values),
+      `5%` = central90[1],
+      `95%` = central90[2],
+      `2.5%` = central95[1],
+      `97.5%` = central95[2],
+      `HDI 95% low` = highest[1],
+      `HDI 95% high` = highest[2],
+      row.names = name,
+      check.names = FALSE
+    )
+  })
+  do.call(rbind, rows)
+}
+```
+
+### Simulated data
+
+1,000 simulated students with known parameters, fitted with the weak priors.
+
+```{r}
+#| label: simulated
+
+truth <- c("alpha" = 50.4, "beta[1]" = 0.7, "beta[2]" = 1.8, "sigma" = 6.6)
+fake <- simulate(1000, truth[["alpha"]], truth[c("beta[1]", "beta[2]")], truth[["sigma"]])
+fake_draws <- draws(bayes_sample(regression, stan_data(fake, WEAK)))
+round(cbind(summarize(fake_draws), Truth = truth), 3)
+```
+
+### HSLS:09
+
+```{r}
+#| label: hsls
+
+round(summarize(hsls_draws), 3)
+```
+
+## Probabilities of statements
+
+A posterior gives probabilities for statements about parameters directly: the
+share of draws for which the statement holds. Some statements about the
+HSLS:09 slopes:
+
+```{r}
+#| label: statements
+
+beta1 <- hsls_draws[["beta[1]"]]
+beta2 <- hsls_draws[["beta[2]"]]
+statements <- list(
+  "SES slope above 0" = beta2 > 0,
+  "SES slope above 1.5 points per unit" = beta2 > 1.5,
+  "SES slope above 2 points per unit" = beta2 > 2,
+  "Base-year math slope below 1" = beta1 < 1,
+  "Base-year math slope between 0.69 and 0.71" = beta1 >= 0.69 & beta1 <= 0.71
+)
+data.frame(
+  `Draws where it holds` = sapply(statements, sum),
+  `Posterior probability` = sapply(statements, mean),
+  check.names = FALSE
+)
+```
+
+A probability of 1 here means all 4,000 draws satisfied the statement. The
+posterior probability is then close to 1, not exactly 1, and 4,000 draws cannot
+say how close. Statements near the edge of the posterior need many draws to
+estimate well.
+
+The base-year math slope below 1 is regression to the mean in relative
+standing: a student who scored 10 points above 50 in the base year is expected
+to score about 7 points above the intercept two years later, given SES. Both
+scores are T-scores, so this is about standing among classmates, not about
+learning. Measurement error in the base-year score contributes to a slope below
+1, as do real changes in standing; this regression cannot separate the two.
+
+## Derived quantities
+
+Any function of the parameters has a posterior too: compute it once per draw.
+The cell computes the expected follow-up score for nine student profiles: base-
+year scores of 40, 50, and 60 crossed with SES of −1, 0, and 1. In the
+analysis sample, SES runs from about −1.9 to 2.9 with an SD of 0.79.
+
+```{r}
+#| label: profiles
+
+center <- settings$w1_math_center
+profiles <- expand_grid(w1_math = c(40, 50, 60), w1_ses = c(-1, 0, 1))
+
+# One column per profile, one row per draw
+expected <- sapply(seq_len(nrow(profiles)), \(i) {
+  hsls_draws$alpha +
+    hsls_draws[["beta[1]"]] * (profiles$w1_math[i] - center) +
+    hsls_draws[["beta[2]"]] * profiles$w1_ses[i]
+})
+colnames(expected) <- sprintf("math %d, SES %+d", profiles$w1_math, profiles$w1_ses)
+bounds <- apply(expected, 2, interval, level = 0.9)
+profiles <- profiles |>
+  mutate(`Posterior mean` = colMeans(expected), `5%` = bounds[1, ], `95%` = bounds[2, ])
+mutate(profiles, across(where(is.double), \(x) round(x, 2)))
+```
+
+```{r}
+#| label: fig-profiles
+#| fig-width: 7
+#| fig-height: 4
+
+profiles |>
+  mutate(SES = factor(sprintf("SES %+d", w1_ses)), x = w1_math + w1_ses * 0.6) |>
+  ggplot(aes(x, `Posterior mean`, colour = SES)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(aes(ymin = `5%`, ymax = `95%`), width = 0.8) +
+  labs(
+    x = "Base-year math score",
+    y = "Expected follow-up math score",
+    colour = NULL,
+    title = "Expected follow-up score by profile, posterior mean and 90% interval"
+  )
+```
+
+The intervals are narrow: with 18,623 students, the expected score for a
+profile is known within about 0.2 points either way. That is uncertainty about
+the average student with the profile, not about any one student, whose score
+varies around the expectation with an SD of about 6.6 points.
+`08-posterior-predictive` covers predictions for individual students.
+
+## Contrasts and standardized effects
+
+Three more derived quantities:
+
+- **SES contrast**: the expected difference between two students with the same
+  base-year score, one at SES +1 and one at SES −1, which is $2\beta_2$.
+- **Standardized SES slope**: the change in the follow-up score, in follow-up
+  SDs, for a one-SD change in SES, holding base-year math fixed. It is
+  $\beta_2$ times the SD of SES over the SD of the follow-up score, using the
+  sample SDs.
+- **Bayesian $R^2$** (Gelman et al., 2019): for each draw, the variance of the
+  expected scores across students over that variance plus $\sigma^2$. It gives
+  a posterior for the share of variance the model explains.
+
+```{r}
+#| label: derived
+
+# The variance of the expected scores across students, for each draw: b' C b,
+# where C is the covariance matrix of the predictors and b the draw's slopes
+predictors <- as.matrix(hsls[c("w1_math_c", "w1_ses")])
+covariance <- cov(predictors) * (nrow(predictors) - 1) / nrow(predictors)
+slopes <- as.matrix(hsls_draws[c("beta[1]", "beta[2]")])
+mu_variance <- rowSums((slopes %*% covariance) * slopes)
+derived <- tibble(
+  `SES contrast, +1 vs -1` = 2 * hsls_draws[["beta[2]"]],
+  `Standardized SES slope` = hsls_draws[["beta[2]"]] * sd(hsls$w1_ses) / sd(hsls$w2_math),
+  `Bayesian R-squared` = mu_variance / (mu_variance + hsls_draws$sigma^2)
+)
+round(summarize(derived, names = names(derived))[c("Mean", "SD", "5%", "95%")], 3)
+```
+
+```{r}
+#| label: fig-derived
+#| fig-width: 13
+#| fig-height: 3.5
+
+derived_long <- derived |>
+  pivot_longer(everything(), names_to = "quantity") |>
+  mutate(quantity = factor(quantity, names(derived)))
+derived_bounds <- derived_long |>
+  reframe(bound = interval(value, 0.9), .by = quantity)
+
+ggplot(derived_long, aes(value)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 50, fill = okabe_ito[1]) +
+  geom_vline(aes(xintercept = bound), derived_bounds, linetype = "dashed", linewidth = 0.4) +
+  facet_wrap(~quantity, nrow = 1, scales = "free") +
+  labs(
+    x = NULL,
+    y = "Density",
+    title = "Posteriors of derived quantities, with central 90% intervals (dashed)"
+  )
+```
+
+## Reporting
+
+A report gives the estimate, its uncertainty, and the scale. The cell writes
+the main result as a sentence from the draws, so the numbers in the text always
+match the analysis.
+
+```{r}
+#| label: reporting
+
+mean2 <- mean(hsls_draws[["beta[2]"]])
+bounds2 <- interval(hsls_draws[["beta[2]"]], 0.9)
+contrast <- derived$`SES contrast, +1 vs -1`
+bounds_c <- interval(contrast, 0.9)
+cat(strwrap(sprintf(
+  paste(
+    "Among students with the same base-year math score, each unit of SES goes with a",
+    "%.2f-point higher follow-up math score (90%% interval %.2f to %.2f).",
+    "A student at SES +1 is expected to score %.1f points higher than a student at",
+    "SES -1 (90%% interval %.1f to %.1f), about %.1f T-score SDs."
+  ),
+  mean2, bounds2[1], bounds2[2], mean(contrast), bounds_c[1], bounds_c[2], mean(contrast) / 10
+)), sep = "\n")
+```
+
+These are associations in the students with complete data, unweighted. They do
+not say what would happen to a student's score if their family's SES changed,
+and they leave out the students missing a math score or SES, who scored lower
+on average (`00-hsls-descriptives`). Later notebooks in the series take up the
+missing data and the design.

@@ -1,0 +1,259 @@
+---
+title: "Fitting the model to simulated data"
+author:
+  - name: "Erik"
+    email: "ewestlund@jhu.edu"
+    url: "https://erik-westlund.academic.page"
+    affiliations:
+      - name: "Johns Hopkins Bloomberg School of Public Health"
+        department: "Department of Biostatistics"
+        city: "Baltimore"
+        country: "United States"
+date: "2026-11-20"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    df-print: kable
+execute:
+  echo: true
+  warning: true
+  message: true
+  cache: false
+---
+
+```{r}
+#| label: setup
+#| message: false
+
+library(framework)
+scaffold()
+```
+
+## Model
+
+$$
+\begin{aligned}
+y_i &\sim \text{Normal}(\mu_i, \sigma) \\
+\mu_i &= a + b x_i \\
+a &\sim \text{Normal}(0, 0.2) \\
+b &\sim \text{Normal}(0, 0.5) \\
+\sigma &\sim \text{Exponential}(1)
+\end{aligned}
+$$
+
+- Data model and priors from post 2.
+- $x_i$: family SES (`parent_ses_z`), the real values.
+- $y_i$: simulated adult SES. The real outcome is not used.
+
+## True values
+
+```{r}
+#| label: truth
+
+true_intercept <- 0
+true_slope <- 0.4
+true_sigma <- sqrt(1 - true_slope^2)
+
+truth <- tibble(
+  parameter = factor(c("Intercept", "Slope", "Residual SD"), c("Intercept", "Slope", "Residual SD")),
+  value = c(true_intercept, true_slope, true_sigma)
+)
+mutate(truth, value = round(value, 3))
+```
+
+- Intercept `r true_intercept`: the outcome is standardized.
+- Slope `r true_slope`: Blau and Duncan's correlation.
+- Residual SD $\sqrt{1 - b^2}$ = `r sprintf("%.2f", true_sigma)`: the outcome
+  SD is then 1.
+
+## Simulated data
+
+```{r}
+#| label: fake-data
+
+mobility <- read_mobility()
+
+fake <- tibble(parent_ses_z = mobility$parent_ses_z) |>
+  slice_sample(prop = 1) |>
+  mutate(fake_adult_ses = simulate_regression(parent_ses_z, true_intercept, true_slope, true_sigma))
+
+fake_ols <- lm(fake_adult_ses ~ parent_ses_z, fake)
+
+tibble(
+  Students = nrow(fake),
+  `SD of y` = sd(fake$fake_adult_ses),
+  `Correlation of x and y` = cor(fake$parent_ses_z, fake$fake_adult_ses),
+  `OLS slope` = coef(fake_ols)[["parent_ses_z"]]
+) |>
+  mutate(across(-Students, \(x) round(x, 3)))
+```
+
+```{r}
+#| label: fig-fake-data
+#| fig-width: 10
+#| fig-height: 3.5
+
+sizes <- c(20, 100, 1000, nrow(fake))
+size_labels <- paste("n =", format(sizes, big.mark = ",", trim = TRUE))
+
+fake_subsets <- bind_rows(lapply(seq_along(sizes), \(i) {
+  mutate(fake[seq_len(sizes[i]), ], size = size_labels[i])
+})) |>
+  mutate(size = factor(size, size_labels))
+
+ggplot(fake_subsets, aes(parent_ses_z, fake_adult_ses)) +
+  geom_point(alpha = 0.15, size = 0.6) +
+  geom_abline(intercept = true_intercept, slope = true_slope, colour = okabe_ito[1], linewidth = 0.8) +
+  facet_wrap(~size, nrow = 1) +
+  labs(
+    x = "Family SES (standardized)",
+    y = "Simulated adult SES",
+    title = "Simulated data and the true line, first n students"
+  )
+```
+
+- Real family SES values in random order; each fit uses the first $n$.
+- Simulated outcome SD `r sprintf("%.3f", sd(fake$fake_adult_ses))`;
+  correlation `r sprintf("%.3f", cor(fake$parent_ses_z, fake$fake_adult_ses))`.
+- Full-sample OLS slope `r sprintf("%.3f", coef(fake_ols)[["parent_ses_z"]])`
+  vs. true `r true_slope`.
+
+## Recovery
+
+```{r}
+#| label: recovery
+#| message: false
+
+model_formula <- fake_adult_ses ~ 0 + Intercept + parent_ses_z
+model_priors <- slope_prior("parent_ses_z", center = 0, sd = 0.5, intercept_sd = 0.2)
+parameters <- c(Intercept = "b_Intercept", Slope = "b_parent_ses_z", `Residual SD` = "sigma")
+
+recovery <- recovery_sweep(fake, model_formula, model_priors, sizes, parameters) |>
+  left_join(truth, by = "parameter") |>
+  mutate(covers = low <= value & value <= high)
+
+recovery |>
+  mutate(
+    across(c(mean, low, high), \(x) round(x, 3)),
+    n = format(n, big.mark = ",")
+  ) |>
+  select(n, Parameter = parameter, Truth = value, `Posterior mean` = mean, `2.5%` = low, `97.5%` = high, `Covers truth` = covers)
+```
+
+```{r}
+#| label: fig-recovery
+#| fig-width: 10
+#| fig-height: 3.5
+
+ggplot(recovery, aes(n, mean)) +
+  geom_hline(aes(yintercept = value), truth, linetype = "dashed", linewidth = 0.4) +
+  geom_errorbar(aes(ymin = low, ymax = high), width = 0.15) +
+  geom_point(size = 1.5) +
+  facet_wrap(~parameter, nrow = 1, scales = "free_y") +
+  scale_x_log10(breaks = sizes, labels = scales::label_comma()) +
+  labs(
+    x = "Students",
+    y = "Posterior mean and 95% interval",
+    title = "Posterior for each parameter by sample size",
+    caption = "Dashed line: the value the data were simulated from."
+  )
+```
+
+```{r}
+#| label: recovery-values
+
+slope_at <- function(size) filter(recovery, parameter == "Slope", n == size)
+width_at <- function(size) slope_at(size)$high - slope_at(size)$low
+```
+
+- Intervals that cover the truth: `r sum(recovery$covers)` of `r nrow(recovery)`.
+- Slope, n = 20: `r sprintf("%.2f", slope_at(20)$mean)`
+  (`r sprintf("%.2f to %.2f", slope_at(20)$low, slope_at(20)$high)`).
+- Slope, n = `r format(nrow(fake), big.mark = ",")`:
+  `r sprintf("%.3f", slope_at(nrow(fake))$mean)`
+  (`r sprintf("%.3f to %.3f", slope_at(nrow(fake))$low, slope_at(nrow(fake))$high)`).
+- Slope interval width: `r sprintf("%.2f", width_at(20))` at n = 20;
+  `r sprintf("%.2f", width_at(100))` at 100; `r sprintf("%.3f", width_at(1000))`
+  at 1,000; `r sprintf("%.3f", width_at(nrow(fake)))` at the full sample.
+- One simulated data set. Repeating with many data sets checks coverage.
+
+## Prior sensitivity
+
+```{r}
+#| label: sensitivity
+#| message: false
+
+slope_priors <- list(
+  "Normal(0, 10)" = slope_prior("parent_ses_z", center = 0, sd = 10, intercept_sd = 0.2),
+  "Normal(0, 0.5)" = model_priors,
+  "Normal(0, 0.1)" = slope_prior("parent_ses_z", center = 0, sd = 0.1, intercept_sd = 0.2)
+)
+
+sensitivity <- prior_sweep(
+  fake, fake_adult_ses ~ parent_ses_z, model_formula, "parent_ses_z", slope_priors, sizes
+) |>
+  filter(Fit != "OLS") |>
+  mutate(Fit = droplevels(Fit))
+
+sensitivity |>
+  select(n, Fit, Estimate) |>
+  pivot_wider(names_from = Fit, values_from = Estimate) |>
+  mutate(across(-n, \(x) round(x, 3)), n = format(n, big.mark = ","))
+```
+
+```{r}
+#| label: fig-sensitivity
+#| fig-width: 10
+#| fig-height: 3.5
+
+ggplot(sensitivity, aes(n, Estimate)) +
+  geom_hline(yintercept = true_slope, linetype = "dashed", linewidth = 0.4) +
+  geom_errorbar(aes(ymin = Low, ymax = High), width = 0.15) +
+  geom_point(size = 1.5) +
+  facet_wrap(~Fit, nrow = 1) +
+  scale_x_log10(breaks = sizes, labels = scales::label_comma()) +
+  labs(
+    x = "Students",
+    y = "Slope",
+    title = "Posterior mean and 95% interval of the slope, by slope prior and sample size",
+    caption = "Dashed line: the true slope. Intercept Normal(0, 0.2) and residual SD Exponential(1) in all three."
+  )
+```
+
+```{r}
+#| label: sensitivity-values
+
+sensitivity_at <- function(size, prior) filter(sensitivity, n == size, Fit == prior)$Estimate
+
+# The largest gap between the three priors' posterior means at each size
+prior_gap <- function(size) diff(range(filter(sensitivity, n == size)$Estimate))
+round(sapply(sizes, prior_gap), 3) |> setNames(format(sizes, big.mark = ","))
+```
+
+- Normal(0, 10): wide. Normal(0, 0.5): the post 2 choice. Normal(0, 0.1):
+  95% of its mass within ±0.2, so 0.4 is unlikely under it.
+- n = 20, posterior mean of the slope:
+  Normal(0, 10) `r sprintf("%.2f", sensitivity_at(20, "Normal(0, 10)"))`;
+  Normal(0, 0.5) `r sprintf("%.2f", sensitivity_at(20, "Normal(0, 0.5)"))`;
+  Normal(0, 0.1) `r sprintf("%.2f", sensitivity_at(20, "Normal(0, 0.1)"))`.
+- n = 1,000: Normal(0, 0.1) `r sprintf("%.3f", sensitivity_at(1000, "Normal(0, 0.1)"))`
+  vs. Normal(0, 10) `r sprintf("%.3f", sensitivity_at(1000, "Normal(0, 10)"))`.
+- Full sample: all three between
+  `r sprintf("%.3f", min(filter(sensitivity, n == nrow(fake))$Estimate))` and
+  `r sprintf("%.3f", max(filter(sensitivity, n == nrow(fake))$Estimate))`.
+- Largest gap between the three: `r sprintf("%.2f", prior_gap(20))` at n = 20;
+  `r sprintf("%.2f", prior_gap(100))` at 100; `r sprintf("%.3f", prior_gap(1000))`
+  at 1,000; `r sprintf("%.3f", prior_gap(nrow(fake)))` at the full sample.
+
+## Summary
+
+- Simulated from known values: $a$ = `r true_intercept`, $b$ = `r true_slope`,
+  $\sigma$ = `r sprintf("%.2f", true_sigma)`.
+- Every 95% interval covers its true value (`r sum(recovery$covers)` of `r nrow(recovery)`).
+- Slope interval width: `r sprintf("%.2f", width_at(20))` at n = 20,
+  `r sprintf("%.3f", width_at(nrow(fake)))` at the full sample.
+- Gap between slope priors: `r sprintf("%.2f", prior_gap(20))` at n = 20,
+  `r sprintf("%.3f", prior_gap(nrow(fake)))` at the full sample.
+- Next: the same model on the real outcome.

@@ -28,3 +28,23 @@ packages:
   - name: lubridate
     source: cran
     auto_attach: false
+  - name: cmdstanr
+    source: github
+    repo: stan-dev/cmdstanr
+    ref: HEAD
+    auto_attach: false
+  - name: posterior
+    source: cran
+    auto_attach: false
+  - name: brms
+    source: cran
+    auto_attach: true
+  - name: haven
+    source: cran
+    auto_attach: false
+  - name: dagitty
+    source: cran
+    auto_attach: false
+  - name: survey
+    source: cran
+    auto_attach: false

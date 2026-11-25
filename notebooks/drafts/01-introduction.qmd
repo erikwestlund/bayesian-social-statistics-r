@@ -1,0 +1,445 @@
+---
+title: "Intergenerational transmission of SES: question and causal diagram"
+author:
+  - name: "Erik"
+    email: "ewestlund@jhu.edu"
+    url: "https://erik-westlund.academic.page"
+    affiliations:
+      - name: "Johns Hopkins Bloomberg School of Public Health"
+        department: "Department of Biostatistics"
+        city: "Baltimore"
+        country: "United States"
+date: "2026-11-20"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    df-print: kable
+execute:
+  echo: true
+  warning: true
+  message: true
+  cache: false
+---
+
+```{r}
+#| label: setup
+#| message: false
+
+library(framework)
+scaffold()
+```
+
+## Question
+
+- How strongly does a family's SES in 10th grade predict the child's SES
+  about ten years later?
+- Intergenerational transmission of status. Blau and Duncan (1967): father's
+  status to son's status.
+
+## The simple model
+
+```{r}
+#| label: dag-simple
+
+dag_labels <- c(
+  parent_ses = "Family SES\n(2002)",
+  adult_ses = "Adult SES\n(2012)",
+  race = "Race and\nethnicity",
+  sex = "Sex",
+  math = "Math score\n(10th grade)",
+  attainment = "Educational\nattainment",
+  parent_ability = "Parents' ability\n(unobserved)",
+  child_ability = "Child's ability\n(unobserved)",
+  motivation = "Motivation\n(10th grade)",
+  school = "School\n(2002)",
+  place = "Place: region,\nurbanicity",
+  true_parent_ses = "Family SES,\ntrue (unobserved)",
+  parents_edu = "Parents'\neducation",
+  parents_occ = "Parents'\noccupations",
+  income = "Family income\n(reported)",
+  income_error = "Reporting error\n(unobserved)",
+  composite = "SES composite\n(BYSES2)",
+  parent_edu_item = "Parents' education\n(parent report)",
+  edu_missing = "Parents' education\nmissing"
+)
+
+dag_simple <- dagitty::dagitty("dag {
+  parent_ses [pos=\"0,0\"]
+  adult_ses [pos=\"2,0\"]
+  parent_ses -> adult_ses
+}")
+```
+
+```{r}
+#| label: fig-dag-simple
+#| fig-width: 5
+#| fig-height: 1.5
+
+plot_dag(dag_simple, dag_labels)
+```
+
+- The simple one: one arrow, family SES to adult SES.
+- The basic model of posts 2 to 4 estimates it: $\mu_i = a + b x_i$.
+
+## Where the series goes
+
+- Each step adds to the diagram and to the model.
+
+### Indicator variables without a reference category
+
+```{r}
+#| label: dag-categories
+
+dag_categories <- dagitty::dagitty("dag {
+  race [pos=\"0,-1.2\"]
+  parent_ses [pos=\"0,0\"]
+  adult_ses [pos=\"2,0\"]
+  sex [pos=\"2,-1.2\"]
+  race -> parent_ses
+  race -> adult_ses
+  parent_ses -> adult_ses
+  sex -> adult_ses
+}")
+```
+
+```{r}
+#| label: fig-dag-categories
+#| fig-width: 5
+#| fig-height: 3
+
+plot_dag(dag_categories, dag_labels)
+```
+
+- Sex (`w1_female`): 2 categories. Causes adult SES only.
+- Race and ethnicity (`w1_race`): 7 categories. Causes family SES and adult
+  SES.
+- Model: $\mu_i = a_{\text{race}[i]} + b x_i$. One intercept per category,
+  each with the same prior. No reference category.
+- With dummy coding, the reference category's mean has one prior and every
+  other category's mean has two (intercept plus difference).
+- Race and sex together: two sets of intercepts. Adding a constant to one set
+  and subtracting it from the other gives the same $\mu_i$, so only the
+  priors pin them down.
+- Adjustment set for family SES to adult SES:
+  `r paste(adjustment_text(dag_categories, "parent_ses", "adult_ses"), collapse = "; ")`.
+
+### Complex models and causal assumptions
+
+- Build the data-generating process from the diagram and the ELS measures.
+- Simulate data from it with known effects.
+- Fit models with and without each measure. Compare with the known effects.
+- Shows when including a measure leads to a mistaken inference.
+
+#### Mediators, colliders, and unobserved ability
+
+```{r}
+#| label: dag-full
+
+dag_full <- dagitty::dagitty("dag {
+  parent_ability [latent, pos=\"0,-2.2\"]
+  child_ability [latent, pos=\"1.5,-2.2\"]
+  parent_ses [pos=\"0,0\"]
+  math [pos=\"1.5,-0.6\"]
+  attainment [pos=\"1.5,0.6\"]
+  adult_ses [pos=\"3,0\"]
+  race [pos=\"0,2.2\"]
+  sex [pos=\"3,2.2\"]
+  parent_ability -> parent_ses
+  parent_ability -> child_ability
+  parent_ses -> child_ability
+  child_ability -> math
+  child_ability -> adult_ses
+  race -> parent_ses
+  race -> adult_ses
+  sex -> adult_ses
+  parent_ses -> adult_ses
+  parent_ses -> math -> adult_ses
+  parent_ses -> attainment -> adult_ses
+  math -> attainment
+}")
+```
+
+```{r}
+#| label: fig-dag-full
+#| fig-width: 8
+#| fig-height: 5
+
+plot_dag(dag_full, dag_labels)
+```
+
+- Dashed: unobserved. Ability stands for anything passed from parents to
+  children that no ELS variable measures.
+- Sex: causes adult SES only. Neither a confounder nor a mediator.
+- Race and ethnicity: causes family SES and adult SES. A confounder.
+- Math score and educational attainment: on paths from family SES to adult
+  SES. Mediators.
+- Parents' ability: on a backdoor path, family SES ← parents' ability →
+  child's ability → adult SES. An unobserved confounder.
+- Child's ability: on a path from family SES to adult SES. A mediator. It
+  comes after family SES, so it does not cause it.
+- In ELS: sex (`w1_female`), race and ethnicity (`w1_race`), math score
+  (`w1_math`), educational attainment (`w4_attainment`). No parents' test
+  scores.
+
+##### What to adjust for
+
+```{r}
+#| label: adjustment
+
+# The same diagram with every line that mentions an ability node removed
+dag_no_ability <- dagitty::dagitty(gsub("[^\n]*ability[^\n]*\n", "", dag_full))
+
+tibble(
+  Diagram = c("Full, abilities unobserved", "Without the abilities"),
+  `Total effect` = c(
+    paste(adjustment_text(dag_full, "parent_ses", "adult_ses"), collapse = "; "),
+    paste(adjustment_text(dag_no_ability, "parent_ses", "adult_ses"), collapse = "; ")
+  ),
+  `Direct effect` = c(
+    paste(adjustment_text(dag_full, "parent_ses", "adult_ses", "direct"), collapse = "; "),
+    paste(adjustment_text(dag_no_ability, "parent_ses", "adult_ses", "direct"), collapse = "; ")
+  )
+)
+```
+
+```{r}
+#| label: math-paths
+
+# Open paths from family SES to adult SES, adjusting for race and ethnicity
+# with and without the math score
+open_paths <- function(z) {
+  found <- dagitty::paths(dag_full, "parent_ses", "adult_ses", Z = z)
+  found$paths[found$open]
+}
+without_math <- open_paths("race")
+with_math <- open_paths(c("race", "math"))
+
+list(
+  `Closed by adjusting for math` = setdiff(without_math, with_math),
+  `Opened by adjusting for math` = setdiff(with_math, without_math)
+)
+```
+
+- Total effect: every path from family SES to adult SES, through the
+  mediators too.
+- Direct effect: only the arrow from family SES to adult SES.
+- Without the abilities: adjust for race and ethnicity for the total effect.
+- With the abilities unobserved: no adjustment set exists. The slope is an association, not
+  a causal effect.
+- Adjusting for the math score closes
+  `r length(setdiff(without_math, with_math))` paths through it and opens
+  `r length(setdiff(with_math, without_math))`: the math score is caused by
+  both family SES and the child's ability, so it is a collider.
+- Sex: not needed for either effect. Adding it shrinks the residual SD.
+
+#### Motivation
+
+```{r}
+#| label: dag-motivation
+
+dag_motivation <- dagitty::dagitty("dag {
+  parent_ability [latent, pos=\"0,-3\"]
+  child_ability [latent, pos=\"1.5,-3\"]
+  motivation [pos=\"2.6,-2.4\"]
+  parent_ses [pos=\"0,0\"]
+  math [pos=\"1.5,-0.7\"]
+  attainment [pos=\"1.5,0.8\"]
+  adult_ses [pos=\"3.4,0\"]
+  race [pos=\"0,2.2\"]
+  sex [pos=\"2.4,2.2\"]
+  parent_ability -> parent_ses
+  parent_ability -> child_ability
+  parent_ses -> child_ability
+  parent_ses -> motivation
+  child_ability -> motivation
+  child_ability -> math
+  child_ability -> adult_ses
+  motivation -> math
+  motivation -> attainment
+  motivation -> adult_ses
+  sex -> motivation
+  sex -> attainment
+  sex -> adult_ses
+  race -> parent_ses
+  race -> adult_ses
+  parent_ses -> adult_ses
+  parent_ses -> math -> adult_ses
+  parent_ses -> attainment -> adult_ses
+  math -> attainment
+}")
+```
+
+```{r}
+#| label: fig-dag-motivation
+#| fig-width: 9
+#| fig-height: 6
+
+plot_dag(dag_motivation, dag_labels)
+```
+
+```{r}
+#| label: motivation-paths
+
+# Paths opened by adjusting for motivation, with race and ethnicity adjusted
+motivation_open <- function(z) {
+  found <- dagitty::paths(dag_motivation, "parent_ses", "adult_ses", Z = z)
+  found$paths[found$open]
+}
+setdiff(motivation_open(c("race", "motivation")), motivation_open("race"))
+```
+
+- Motivation: caused by family SES (expectations, resources), the child's
+  ability, and sex. Causes the math score, attainment, and adult SES.
+- Sex: now on a path through motivation and attainment.
+- Motivation is a mediator, and a collider of family SES and the child's
+  ability: adjusting for it opens
+  `r length(setdiff(motivation_open(c("race", "motivation")), motivation_open("race")))`
+  paths, through the child's ability and through sex.
+- ELS base-year measures (NCES documentation): instrumental motivation,
+  intrinsic interest, control expectation, action control, self-efficacy in
+  math and English; the student's educational expectations (BYSTEXP); the
+  parents' aspirations (BYPARASP); hours of math homework.
+
+### Other challenges
+
+#### Clustering
+
+```{r}
+#| label: dag-clustering
+
+dag_clustering <- dagitty::dagitty("dag {
+  place [pos=\"1,-1.4\"]
+  parent_ses [pos=\"0,0\"]
+  school [pos=\"1,1.2\"]
+  adult_ses [pos=\"2,0\"]
+  place -> parent_ses
+  place -> school
+  place -> adult_ses
+  parent_ses -> school
+  school -> adult_ses
+  parent_ses -> adult_ses
+}")
+```
+
+```{r}
+#| label: fig-dag-clustering
+#| fig-width: 5
+#| fig-height: 4
+
+plot_dag(dag_clustering, dag_labels)
+```
+
+- ELS sampled schools, then students within them.
+- Place: local economy and opportunities. Causes family SES, the school, and
+  adult SES. A confounder. In ELS: region (`school_w1_region`), urbanicity
+  (`school_w1_urbanicity`).
+- School: families sort into schools by SES; schools differ in what they
+  give students. A mediator.
+- Students in the same school are not independent given family SES.
+- Adjustment set for family SES to adult SES, total effect:
+  `r paste(adjustment_text(dag_clustering, "parent_ses", "adult_ses"), collapse = "; ")`.
+- Adjusting for school blocks the path through it: a within-school slope.
+- Model: varying intercepts by school, $a_{\text{school}[i]}$, with a shared
+  prior. Partial pooling. Separating within- and between-school slopes is part
+  of the step.
+- The crosswalk keeps the design's stratum and PSU; no school ID yet.
+
+#### Measurement error
+
+```{r}
+#| label: dag-measurement
+
+dag_measurement <- dagitty::dagitty("dag {
+  true_parent_ses [latent, pos=\"1.5,-1.4\"]
+  parents_edu [pos=\"0,0\"]
+  parents_occ [pos=\"1,0\"]
+  income [pos=\"2,0\"]
+  income_error [latent, pos=\"3,-0.7\"]
+  composite [pos=\"1,1.4\"]
+  adult_ses [pos=\"3.4,-1.4\"]
+  true_parent_ses -> parents_edu
+  true_parent_ses -> parents_occ
+  true_parent_ses -> income
+  income_error -> income
+  parents_edu -> composite
+  parents_occ -> composite
+  income -> composite
+  true_parent_ses -> adult_ses
+}")
+```
+
+```{r}
+#| label: fig-dag-measurement
+#| fig-width: 7
+#| fig-height: 4
+
+plot_dag(dag_measurement, dag_labels, half_width = 0.42)
+```
+
+- True family SES is unobserved. Parents' education, occupations, and income
+  are its measures.
+- Income: reported in categories, one year, imputed for some families.
+- The composite averages the measures, error included.
+- The arrow to adult SES starts at true family SES. A slope on the composite
+  is attenuated toward 0.
+- Model: true family SES as a latent variable, the measures as indicators.
+
+#### Missing data
+
+```{r}
+#| label: dag-missing
+
+dag_missing <- dagitty::dagitty("dag {
+  race [pos=\"1,-1.2\"]
+  parent_edu_item [exposure, pos=\"0,0\"]
+  adult_ses [outcome, pos=\"2,0\"]
+  edu_missing [pos=\"1,1.2\"]
+  race -> parent_edu_item
+  race -> adult_ses
+  parent_edu_item -> adult_ses
+  race -> edu_missing
+}")
+```
+
+```{r}
+#| label: fig-dag-missing
+#| fig-width: 5
+#| fig-height: 3.5
+
+plot_dag(dag_missing, dag_labels)
+```
+
+```{r}
+#| label: missing-items
+
+items <- data_read(
+  "inputs.private.final.els_clean",
+  col_select = c("w1_parent_responded", "w1_parent1_edu", "w1_parent1_occ", "w1_math_efficacy_a"),
+  col_types = readr::cols(.default = "d")
+)
+item_missing <- tibble(
+  Item = c("Responding parent's education", "Responding parent's occupation", "Math self-efficacy (first item)"),
+  `Share missing` = round(c(mean(is.na(items$w1_parent1_edu)), mean(is.na(items$w1_parent1_occ)), mean(is.na(items$w1_math_efficacy_a))), 3)
+)
+parents_not_responding <- sum(items$w1_parent_responded == 0, na.rm = TRUE)
+item_missing
+```
+
+- Missing items, not missing people: the student is in the data, one answer
+  is not.
+- Parents' education as reported by the parent (`w1_parent1_edu`, BYP34A):
+  missing for `r sprintf("%.0f%%", 100 * item_missing[[2]][1])` of students.
+  `r format(parents_not_responding, big.mark = ",")` parents did not return the
+  parent questionnaire.
+- NCES fills these gaps in its composites (BYPARED, BYSES2) from student
+  reports and imputation. The raw items are not filled.
+- Missingness node: arrows into it show what makes the item missing. Here only
+  race and ethnicity, which is fully observed: missing at random (MAR) given
+  race and ethnicity. Bayesian imputation and multiple imputation both assume
+  MAR given the variables in the imputation model.
+- An arrow from parents' education to its own missingness would make it missing
+  not at random (MNAR). Neither method alone removes that bias. Left for later.
+- Models: complete cases, Bayesian imputation (`mi()` in brms), multiple
+  imputation. Compared on simulated data with each mechanism.

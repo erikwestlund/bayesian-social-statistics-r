@@ -1,0 +1,573 @@
+---
+title: "Sampler diagnostics"
+author:
+  - name: "Erik"
+    email: "ewestlund@jhu.edu"
+    url: "https://erik-westlund.academic.page"
+    affiliations:
+      - name: "Johns Hopkins Bloomberg School of Public Health"
+        department: "Department of Biostatistics"
+        city: "Baltimore"
+        country: "United States"
+date: "2026-11-18"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    code-fold: false
+    df-print: kable
+execute:
+  echo: true
+  warning: true
+  message: true
+  cache: false
+---
+
+MCMC draws are only a sample from the posterior if the chains have converged
+and mixed. Nothing in the draws themselves announces a failure: a broken fit
+returns numbers just like a good one. This notebook goes through the checks
+that catch failures, first on a fit that passes them, then on two fits built to
+fail, and then on a model with one intercept per school context, whose group
+estimates are shown in caterpillar plots.
+
+The checks fall into two groups:
+
+- **Convergence and precision**, computed from the draws of each parameter:
+  R-hat, effective sample size (ESS), and Monte Carlo standard error (MCSE).
+- **Sampler behavior**, recorded by HMC at each iteration: divergent
+  transitions, trajectories that hit the maximum tree depth, and the energy
+  diagnostic E-BFMI.
+
+```{r}
+#| label: setup
+#| message: false
+
+library(framework)
+scaffold() # sources functions/bayes.R
+
+theme_set(theme_minimal(base_size = 11))
+okabe_ito <- unname(palette.colors(palette = "Okabe-Ito"))[c(6, 2, 4, 7, 3, 8, 5)]
+options(ggplot2.discrete.colour = okabe_ito, ggplot2.discrete.fill = okabe_ito)
+
+clean <- data_read(
+  "inputs.private.final.hsls_clean",
+  col_types = readr::cols(student_id = "c", .default = "d")
+)
+hsls <- analysis_sample(clean)
+regression <- bayes_model("regression")
+grouped <- bayes_model("regression_groups")
+
+# One seed for the subsamples
+set.seed(606)
+```
+
+## Convergence and precision
+
+`fit$summary()`, which uses the posterior package, reports for each parameter:
+
+- **R-hat** compares the spread within each chain with the spread across chains,
+  after splitting each chain in half and rank-normalizing the draws (Vehtari et
+  al., 2021). Stan reports the larger of that value and the same statistic
+  computed on folded draws, the distances from the median, which catches
+  chains that agree on location but not on spread. Chains that sampled the
+  same distribution give R-hat near 1. A value above 1.01 means the chains
+  disagree, and the draws should not be used.
+- **ESS** is the number of independent draws that would give the same precision
+  as the autocorrelated draws in hand. Bulk ESS measures precision for the
+  center of the distribution, such as the mean or median. Tail ESS measures it
+  for the 5th and 95th percentiles. Both should be at least 100 per chain, 400
+  for four chains.
+- **MCSE** is the standard error of the posterior mean due to having a finite
+  number of draws: roughly the posterior SD over the square root of the ESS.
+  Stan computes the ESS for this from the draws as they are, not after the rank
+  normalization used for bulk ESS, so the two can differ when a fit fails. The
+  MCSE should be small next to the posterior SD.
+
+The cell fits the regression to HSLS:09 and shows the summary.
+
+```{r}
+#| label: good-fit
+
+# fit$summary() with the columns and names of cmdstanpy's summary, one row per
+# parameter
+summary_table <- function(fit, variables = NULL) {
+  summary <- fit$summary(
+    variables,
+    Mean = mean,
+    MCSE = posterior::mcse_mean,
+    StdDev = sd,
+    \(x) posterior::quantile2(x, c(0.05, 0.5, 0.95)),
+    ESS_bulk = posterior::ess_bulk,
+    ESS_tail = posterior::ess_tail,
+    R_hat = posterior::rhat
+  )
+  table <- data.frame(summary[-1], row.names = summary$variable, check.names = FALSE)
+  names(table)[names(table) %in% c("q5", "q50", "q95")] <- c("5%", "50%", "95%")
+  table
+}
+
+fit <- bayes_sample(regression, stan_data(hsls, WEAK))
+parameters <- c("alpha", "beta[1]", "beta[2]", "sigma")
+round(summary_table(fit, parameters), 3)
+```
+
+## Sampler behavior
+
+- **Divergent transitions** happen when a trajectory runs into a region where
+  the posterior curves too sharply for the step size, and the simulation of the
+  particle's path breaks down. Draws near such regions are missing or
+  misweighted, so even a few divergences can bias the results.
+- **Maximum tree depth.** NUTS doubles a trajectory until it turns back on
+  itself, up to a limit of 10 doublings by default. Hitting the limit is a
+  warning about efficiency, not validity: the sampler needed longer
+  trajectories than allowed.
+- **E-BFMI** (energy Bayesian fraction of missing information) compares how
+  much the energy changes between iterations with how much it varies overall.
+  Values below 0.3 are a warning that the sampler explores the energy
+  distribution poorly, often a sign of heavy tails or a hard geometry.
+
+The function below computes all three from the sampler columns.
+
+```{r}
+#| label: sampler-checks
+
+sampler_checks <- function(fit, max_depth = 10) {
+  sampler <- posterior::as_draws_df(fit$sampler_diagnostics())
+  checks <- as.data.frame(sampler) |>
+    mutate(chain = sampler$.chain) |>
+    group_by(chain) |>
+    summarise(
+      `Divergent transitions` = sum(divergent__),
+      `At maximum tree depth` = sum(treedepth__ >= max_depth),
+      `E-BFMI` = sum(diff(energy__)^2) / sum((energy__ - mean(energy__))^2),
+      `Mean steps per iteration` = mean(n_leapfrog__)
+    )
+  data.frame(round(checks[-1], 2), row.names = paste("Chain", checks$chain), check.names = FALSE)
+}
+
+sampler_totals <- function(fit, max_depth = 10) {
+  # One row for all chains: counts summed over chains, steps averaged over draws
+  sampler <- as.data.frame(posterior::as_draws_df(fit$sampler_diagnostics()))
+  c(
+    "Divergent transitions" = sum(sampler$divergent__),
+    "At maximum tree depth" = sum(sampler$treedepth__ >= max_depth),
+    "Mean steps per iteration" = round(mean(sampler$n_leapfrog__), 1)
+  )
+}
+
+sampler_checks(fit)
+```
+
+```{r}
+#| label: diagnose
+
+# CmdStan's own check reports the same quantities in words
+fit$cmdstan_diagnose()
+```
+
+## Trace and rank plots
+
+A trace plot shows each chain's draws in order. Chains that mix well overlap and
+look like noise around a stable level. A rank plot pools the draws of all
+chains, ranks them, and shows a histogram of ranks for each chain. When the
+chains sample the same distribution, each chain's ranks are spread evenly, so
+every histogram is flat. Rank plots show problems that trace plots hide when
+many draws overlap (Vehtari et al., 2021).
+
+```{r}
+#| label: trace-and-rank
+
+trace_and_rank <- function(fit, names, title) {
+  fit_draws <- posterior::as_draws_df(fit$draws(names))
+  traces <- list()
+  rank_plots <- list()
+  # One set of bin edges for every chain, so the histograms are comparable
+  breaks <- seq(0.5, nrow(fit_draws) + 0.5, length.out = 21)
+  for (name in names) {
+    one <- tibble(
+      chain = factor(paste("Chain", fit_draws$.chain)),
+      iteration = fit_draws$.iteration,
+      value = fit_draws[[name]],
+      rank = rank(value)
+    )
+    counts <- one |>
+      mutate(bin = cut(rank, breaks, include.lowest = TRUE, labels = FALSE)) |>
+      count(chain, bin) |>
+      complete(chain, bin = 1:20, fill = list(n = 0))
+    traces[[name]] <- ggplot(one, aes(iteration, value, colour = chain)) +
+      geom_line(linewidth = 0.2, alpha = 0.8, show.legend = FALSE) +
+      labs(x = "Iteration", y = if (name == names[1]) "Draw" else NULL, title = name)
+    rank_plots[[name]] <- ggplot(counts, aes(breaks[bin], n, colour = chain)) +
+      geom_step(direction = "hv", linewidth = 0.5, show.legend = name == names[length(names)]) +
+      labs(
+        x = "Rank of draw, all chains pooled",
+        y = if (name == names[1]) "Draws per bin" else NULL,
+        colour = NULL
+      ) +
+      theme(legend.position = "inside", legend.position.inside = c(1, 0), legend.justification = c(1, 0))
+  }
+  arrange_plots(c(traces, rank_plots), ncol = length(names), title = title)
+}
+```
+
+```{r}
+#| label: fig-trace-good
+#| fig-width: 13.6
+#| fig-height: 5.5
+
+trace_and_rank(fit, parameters, "Trace plots (top) and rank plots (bottom), HSLS:09 regression")
+```
+
+All four parameters pass: R-hat is 1.00, bulk and tail ESS are in the
+thousands, MCSE is a small fraction of the posterior SD, there are no
+divergences, and the trace and rank plots look as they should. The next two
+fits are built to fail.
+
+## Failure 1: chains too short for an awkward posterior
+
+This fit makes two changes. It uses base-year math without centering, so the
+intercept is the expected score at a base-year score of 0, far outside the
+data, and the intercept and slope become almost perfectly correlated in the
+posterior. And it runs only 50 warmup and 50 sampling iterations per chain,
+too few to adapt to that correlation. It uses flat priors, since the weak prior
+on the intercept assumes centering.
+
+```{r}
+#| label: short
+
+uncentered <- mutate(hsls, w1_math_c = w1_math)
+short <- bayes_sample(regression, stan_data(uncentered), iter_warmup = 50, iter_sampling = 50)
+round(summary_table(short, parameters), 3)
+```
+
+```{r}
+#| label: fig-trace-short
+#| fig-width: 13.6
+#| fig-height: 5.5
+
+trace_and_rank(short, parameters, "Too few iterations and an uncentered predictor")
+```
+
+```{r}
+#| label: short-correlation
+
+# The posterior correlation between the intercept and the base-year math slope,
+# with and without centering, from the converged fit. Without centering, the
+# intercept is the expected score at a base-year score of 0, alpha - 50 * beta[1].
+good <- draws(fit)
+data.frame(
+  `Posterior correlation` = round(c(
+    cor(good$alpha, good[["beta[1]"]]),
+    cor(good$alpha - 50 * good[["beta[1]"]], good[["beta[1]"]])
+  ), 3),
+  row.names = c("Centered: alpha and beta[1]", "Uncentered: alpha - 50 beta[1] and beta[1]"),
+  check.names = FALSE
+)
+```
+
+The summary flags the failure: R-hat above 1.01 and bulk ESS far below 400 for
+every parameter. The trace plots show chains that have not settled on a common
+level, and the rank plots are uneven.
+
+The second table shows why the uncentered version is hard, using the converged
+fit from above so the comparison is like for like. Without centering, the
+intercept is the expected score at a base-year score of 0, and it is almost
+perfectly correlated with the slope: a steeper line must start lower. The
+sampler has to move along that narrow ridge, which takes long chains and a
+well-adapted scaling. The remedy here is both changes reversed: centering the
+predictor removes most of the correlation, and longer warmup lets the sampler
+adapt. More iterations alone would also work, slowly.
+
+## Failure 2: a funnel in a hierarchical model
+
+The model in `stan/regression_groups.stan` adds an intercept for each school
+context: the 31 combinations of census region, locale, and public or private
+control that occur in the sample. The group intercepts $a_j$ come from a common
+Normal(0, $\tau$) distribution, so groups with little data are pulled toward 0,
+and $\tau$ is estimated.
+
+With few students per group, the posterior of this model has a funnel: when
+$\tau$ is small, the $a_j$ must all be near 0, and when $\tau$ is large, they
+can spread out. A step size that suits the mouth of the funnel is too large for
+its neck, so the sampler either avoids the neck, sticks in it for long
+stretches, or diverges there. The program has two forms of the same model:
+
+- **Centered**: it samples each $a_j$ directly.
+- **Non-centered**: it samples standardized offsets $z_j$ and sets
+  $a_j = \tau z_j$, which removes the funnel from the space the sampler
+  explores.
+
+The cell fits both forms to 3 students per group, drawn at random.
+
+```{r}
+#| label: funnel
+
+REGION <- c("1" = "Northeast", "2" = "Midwest", "3" = "South", "4" = "West")
+LOCALE <- c("1" = "City", "2" = "Suburb", "3" = "Town", "4" = "Rural")
+CONTROL <- c("1" = "Public", "0" = "Private")
+
+hsls <- hsls |>
+  mutate(context = paste(
+    REGION[as.character(school_w1_region)],
+    LOCALE[as.character(school_w1_locale)],
+    CONTROL[as.character(school_w1_public)],
+    sep = ", "
+  ))
+contexts <- sort(unique(hsls$context), method = "radix")
+hsls$group <- match(hsls$context, contexts)
+
+group_data <- function(data, centered) {
+  regression_data <- stan_data(data, WEAK)
+  c(
+    regression_data[setdiff(names(regression_data), c("prior", "prior_only", "predict"))],
+    list(J = length(contexts), group = data$group, tau_rate = 0.5, centered = as.integer(centered))
+  )
+}
+
+few <- hsls |>
+  group_by(group) |>
+  slice_sample(n = 3) |>
+  ungroup()
+few_fits <- list(
+  "Centered" = bayes_sample(grouped, group_data(few, centered = TRUE)),
+  "Non-centered" = bayes_sample(grouped, group_data(few, centered = FALSE))
+)
+as.data.frame(t(sapply(few_fits, sampler_totals)), check.names = FALSE)
+```
+
+```{r}
+#| label: funnel-summary
+
+form_summary <- function(fit_form) {
+  summary <- summary_table(fit_form)
+  intercepts <- summary[startsWith(rownames(summary), "a["), ]
+  slopes <- summary[c("beta[1]", "beta[2]"), ]
+  c(
+    "tau: R-hat" = summary["tau", "R_hat"],
+    "tau: bulk ESS" = summary["tau", "ESS_bulk"],
+    "Group intercepts: largest R-hat" = max(intercepts$R_hat),
+    "Group intercepts: R-hat above 1.01" = sum(intercepts$R_hat > 1.01),
+    "Group intercepts: smallest bulk ESS" = min(intercepts$ESS_bulk),
+    "Slopes: largest R-hat" = max(slopes$R_hat),
+    "Slopes: smallest bulk ESS" = min(slopes$ESS_bulk)
+  )
+}
+
+as.data.frame(round(sapply(few_fits, form_summary), 3), check.names = FALSE)
+```
+
+```{r}
+#| label: fig-funnel
+#| fig-width: 11
+#| fig-height: 4
+
+# Each panel plots the parameter the sampler moves in: a[1] in the centered
+# form, the standardized offset z[1] in the non-centered form
+sampled <- c("Centered" = "a[1]", "Non-centered" = "z[1]")
+funnel <- bind_rows(lapply(names(few_fits), \(name) {
+  f <- few_fits[[name]]
+  tibble(
+    form = name,
+    a1 = as.vector(f$draws(sampled[[name]])),
+    log_tau = log(as.vector(f$draws("tau"))),
+    divergent = as.vector(f$sampler_diagnostics()[, , "divergent__"]) == 1
+  )
+})) |>
+  mutate(form = sprintf("%s: %d divergent transitions", form, sum(divergent)), .by = form) |>
+  mutate(form = factor(form, unique(form)))
+
+ggplot(funnel, aes(a1, log_tau)) +
+  geom_point(aes(colour = "Draw"), data = filter(funnel, !divergent), size = 0.4, alpha = 0.3) +
+  geom_point(aes(colour = "Divergent transition"), data = filter(funnel, divergent), size = 1.2) +
+  facet_wrap(~form, scales = "free_x") +
+  scale_colour_manual(values = c("Draw" = okabe_ito[1], "Divergent transition" = "red")) +
+  labs(
+    x = "Group 1: a[1] (centered, left) or z[1] (non-centered, right)",
+    y = "log(tau)",
+    colour = NULL,
+    title = "What the sampler sees, 3 students per group: a funnel (left) and its non-centered form (right)"
+  ) +
+  theme(legend.position = "bottom")
+```
+
+The centered fit fails mainly on $\tau$: its R-hat is above 1.01 and its bulk
+ESS far below 400. The group intercepts depend on $\tau$, and every one of
+them has an R-hat slightly above 1.01, while the slopes pass. The chains move in and out of the neck of the funnel slowly,
+so they disagree about $\tau$ and the intercepts that depend on it. The
+non-centered form samples $\tau$ with R-hat near 1 and a bulk ESS above
+1,000. Diagnostics computed for every parameter catch this kind of failure,
+which a look at the coefficients of interest would miss.
+
+Divergent transitions are the other symptom of a funnel. They can appear in
+either form with this little data, and any divergence matters: it marks a part
+of the posterior the draws do not represent. The usual first remedy is a higher
+target acceptance rate, `adapt_delta`, which makes warmup choose a smaller step
+size. The next cell refits the non-centered form with `adapt_delta` raised from
+the default 0.8 to 0.99.
+
+```{r}
+#| label: adapt-delta
+
+careful <- bayes_sample(grouped, group_data(few, centered = FALSE), adapt_delta = 0.99)
+as.data.frame(rbind(
+  "Non-centered, adapt_delta 0.8" = sampler_totals(few_fits[["Non-centered"]]),
+  "Non-centered, adapt_delta 0.99" = sampler_totals(careful)
+), check.names = FALSE)
+```
+
+## The hierarchical model on all students
+
+With all 18,623 students, each school context has between 39 and 2,356
+students, and the data pin down each intercept. The funnel goes away. With
+data this informative, the centered form often samples better, because the
+non-centered form then makes $z_j$ and $\tau$ strongly dependent. Here both
+forms pass every check, with similar effective sample sizes. The centered form
+goes forward to the plots below.
+
+```{r}
+#| label: full-fits
+
+full_fits <- list(
+  "Centered" = bayes_sample(grouped, group_data(hsls, centered = TRUE)),
+  "Non-centered" = bayes_sample(grouped, group_data(hsls, centered = FALSE))
+)
+full_summaries <- lapply(full_fits, summary_table)
+comparison <- lapply(names(full_fits), \(name) {
+  summary <- full_summaries[[name]]
+  tibble(
+    Form = name,
+    `Divergent transitions` = sampler_totals(full_fits[[name]])[["Divergent transitions"]],
+    `Largest R-hat` = round(max(summary$R_hat), 4),
+    `Smallest bulk ESS` = round(min(summary$ESS_bulk), 1),
+    `Smallest tail ESS` = round(min(summary$ESS_tail), 1),
+    `Parameter with the smallest bulk ESS` = rownames(summary)[which.min(summary$ESS_bulk)]
+  )
+})
+bind_rows(comparison)
+```
+
+## Diagnostics for every parameter
+
+A model with dozens of parameters needs a view of all of them at once. The plot
+shows R-hat and bulk ESS for every parameter of the centered fit, with the
+thresholds: R-hat 1.01 and ESS 400.
+
+```{r}
+#| label: fig-every-parameter
+#| fig-width: 11
+#| fig-height: 8
+
+full <- full_fits[["Centered"]]
+every <- full_summaries[["Centered"]] |>
+  rownames_to_column("parameter") |>
+  filter(parameter != "lp__", !startsWith(parameter, "z[")) |>
+  mutate(parameter = fct_reorder(parameter, ESS_bulk, .desc = TRUE))
+
+rhat_panel <- ggplot(every, aes(R_hat, parameter)) +
+  geom_point(size = 1, colour = okabe_ito[1]) +
+  geom_vline(xintercept = 1.01, colour = "red", linetype = "dashed") +
+  labs(x = "R-hat", y = NULL) +
+  theme(axis.text.y = element_text(size = 7))
+ess_panel <- ggplot(every, aes(ESS_bulk, parameter)) +
+  geom_point(size = 1, colour = okabe_ito[1]) +
+  geom_vline(xintercept = 400, colour = "red", linetype = "dashed") +
+  scale_x_log10(labels = scales::label_comma()) +
+  labs(x = "Bulk ESS (log scale)", y = NULL) +
+  theme(axis.text.y = element_text(size = 7))
+arrange_plots(
+  list(rhat_panel, ess_panel),
+  ncol = 2,
+  title = "R-hat and bulk ESS for every parameter, centered hierarchical model (dashed: thresholds)"
+)
+```
+
+## Caterpillar plots
+
+A caterpillar plot shows one interval per group, sorted by the posterior mean,
+so the groups line up like the segments of a caterpillar. Each segment here is
+a school context's intercept: how far its students' expected follow-up score
+sits from the overall intercept, for students with the same base-year math and
+SES. The thick bar is the central 50% interval and the thin line the central
+90% interval.
+
+```{r}
+#| label: fig-caterpillar
+#| fig-width: 8
+#| fig-height: 9
+
+a <- posterior::as_draws_matrix(full$draws("a"))
+sizes <- table(hsls$context)
+
+caterpillar <- tibble(
+  context = contexts,
+  mean = colMeans(a),
+  q05 = apply(a, 2, quantile, 0.05),
+  q25 = apply(a, 2, quantile, 0.25),
+  q75 = apply(a, 2, quantile, 0.75),
+  q95 = apply(a, 2, quantile, 0.95),
+  n = as.vector(sizes[contexts])
+) |>
+  arrange(mean) |>
+  mutate(label = fct_inorder(sprintf("%s (n = %s)", context, format(n, big.mark = ","))))
+
+ggplot(caterpillar, aes(y = label)) +
+  geom_vline(xintercept = 0, colour = "grey", linetype = "dashed") +
+  geom_segment(aes(x = q05, xend = q95), colour = okabe_ito[1], linewidth = 0.4) +
+  geom_segment(aes(x = q25, xend = q75), colour = okabe_ito[1], linewidth = 1.6) +
+  geom_point(aes(x = mean), size = 0.9) +
+  labs(
+    x = "Group intercept: follow-up math points relative to the overall intercept",
+    y = NULL,
+    title = "School-context intercepts, posterior mean with 50% and 90% intervals"
+  ) +
+  theme(axis.text.y = element_text(size = 8))
+```
+
+```{r}
+#| label: fig-pooling
+#| fig-width: 6.5
+#| fig-height: 5
+
+# Partial pooling: a group's estimate is pulled toward 0 more when it has
+# fewer students. The comparison is each group's mean residual around the
+# hierarchical model's own common intercept and slopes (posterior means), the
+# estimate a group would get with no pooling and the same reference point.
+common <- colMeans(draws(full, c("alpha", "beta[1]", "beta[2]"))[-(1:2)])
+residual <- hsls$w2_math - (common[["alpha"]] + common[["beta[1]"]] * hsls$w1_math_c + common[["beta[2]"]] * hsls$w1_ses)
+raw <- tapply(residual, hsls$context, mean)
+pooling <- mutate(caterpillar, raw = as.vector(raw[context]))
+limits <- range(c(pooling$raw, pooling$mean)) + c(-0.2, 0.2)
+
+print(
+  ggplot(pooling, aes(raw, mean, colour = log10(n))) +
+    geom_abline(colour = "grey", linetype = "dashed") +
+    geom_point(size = 2) +
+    scale_colour_viridis_c() +
+    coord_cartesian(xlim = limits, ylim = limits) +
+    labs(
+      x = "Mean residual in the group around the common line (no pooling)",
+      y = "Posterior mean of the group intercept",
+      colour = "Students in the\ngroup (log10)",
+      title = "Partial pooling pulls small groups toward 0"
+    )
+)
+cat(sprintf(
+  "Posterior mean of tau, the SD of the group intercepts: %.2f\n",
+  mean(as.vector(full$draws("tau")))
+))
+
+# How far each estimate moved toward 0, for the smallest and largest groups
+moved <- pooling |>
+  mutate(moved = raw - mean) |>
+  arrange(n)
+bind_rows(head(moved, 5), tail(moved, 5)) |>
+  select(context, n, raw, mean, moved) |>
+  mutate(across(c(raw, mean, moved), \(x) round(x, 2)))
+```
+
+Groups on the dashed line keep their no-pooling estimate. The table lists the
+five smallest and five largest groups and how far each estimate moved toward 0.
+Large groups barely move, since their data dominate. Small groups with a large
+raw mean move the most, because the hierarchical prior, with an SD of $\tau$
+estimated from all groups, pulls them in. That is the regularization from `01-ols-vs-bayes` again, with the
+amount of pulling learned from the data.

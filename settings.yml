@@ -1,6 +1,6 @@
 default:
   project_name: bayesian-social-statistics-r
-  project_type: project_sensitive
+  project_type: project
   tools:
     quarto: true
     renv: false
@@ -45,5 +45,5 @@ default:
   quarto: settings/quarto.yml
   data: settings/data.yml
   security:
-    sensitive: true
+    sensitive: false
   data_hooks: ~

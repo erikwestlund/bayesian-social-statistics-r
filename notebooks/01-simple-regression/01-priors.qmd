@@ -1,0 +1,194 @@
+---
+title: "Priors"
+author:
+  - name: "Erik"
+    email: "ewestlund@jhu.edu"
+    url: "https://erik-westlund.academic.page"
+    affiliations:
+      - name: "Johns Hopkins Bloomberg School of Public Health"
+        department: "Department of Biostatistics"
+        city: "Baltimore"
+        country: "United States"
+date: "2026-11-22"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    df-print: kable
+execute:
+  echo: true
+  warning: true
+  message: true
+  cache: false
+---
+
+```{r}
+#| label: setup
+#| message: false
+
+library(framework)
+scaffold()
+```
+
+## Model
+
+$$
+\begin{aligned}
+\text{Adult SES}_i &\sim \text{Normal}(\mu_i, \sigma) \\
+\mu_i &= \alpha + \beta\,\text{Family SES}_i
+\end{aligned}
+$$
+
+- Family: Normal.
+- Linear model: intercept $\alpha$, slope $\beta$.
+- Parameters needing priors: $\alpha$, $\beta$, $\sigma$.
+
+## Standardized variables
+
+```{r}
+#| label: standardize
+
+mobility <- read_mobility()
+mean_sd_table(mobility, w1_ses, w4_ses, parent_ses_z, adult_ses_z)
+```
+
+- n = `r format(nrow(mobility), big.mark = ",")` students with both SES
+  measures.
+- `parent_ses_z` (family SES, 2002) and `adult_ses_z` (adult SES, 2012):
+  mean 0, SD 1.
+
+## Intercept
+
+```{r}
+#| label: fig-intercept-priors
+#| fig-width: 6
+#| fig-height: 3
+
+intercept_priors <- c(prior_normal(0, 0.2), prior_normal(0, 0.5), prior_normal(0, 1))
+
+plot_priors(intercept_priors, x_label = "α, expected adult SES at family SES = 0 (SD)", limits = c(-3, 3))
+```
+
+- 95% of each prior:
+  - Normal(0, 0.2): `r interval_text(intercept_priors[[1]])`.
+  - Normal(0, 0.5): `r interval_text(intercept_priors[[2]])`.
+  - Normal(0, 1): `r interval_text(intercept_priors[[3]])`.
+
+## Slope
+
+```{r}
+#| label: fig-slope-priors
+#| fig-width: 6
+#| fig-height: 3
+
+slope_priors <- c(prior_normal(0, 0.5), prior_normal(0, 1))
+
+plot_priors(
+  slope_priors,
+  x_label = "β, expected difference in adult SES per SD of family SES",
+  limits = c(-3, 3), possible = c(-1, 1)
+)
+```
+
+- Possible values: −1 to 1. With both variables standardized, the slope is
+  the correlation.
+- Normal(0, 0.5): 95% `r interval_text(slope_priors[[1]])`; share between
+  −1 and 1: `r sprintf("%.2f", prior_share(slope_priors[[1]], -1, 1))`.
+- Normal(0, 1): 95% `r interval_text(slope_priors[[2]])`; share between
+  −1 and 1: `r sprintf("%.2f", prior_share(slope_priors[[2]], -1, 1))`.
+
+## Residual SD
+
+```{r}
+#| label: fig-sigma-priors
+#| fig-width: 6
+#| fig-height: 3
+
+sigma_priors <- c(prior_exponential(1), prior_half_normal(1), prior_half_t(3, 2.5))
+
+plot_priors(
+  sigma_priors,
+  x_label = "σ, SD of adult SES around the line (SD)",
+  limits = c(0, 4), possible = c(0, 1)
+)
+```
+
+- Possible values: greater than 0 and at most 1, the SD of adult SES.
+- Exponential(1): mean 1. 95% `r interval_text(sigma_priors[[1]])`; share
+  above 1: `r sprintf("%.2f", prior_share(sigma_priors[[1]], 1, Inf))`.
+- Half-normal(0, 1): Stan prior recommendations. 95%
+  `r interval_text(sigma_priors[[2]])`; share above 1:
+  `r sprintf("%.2f", prior_share(sigma_priors[[2]], 1, Inf))`.
+- Half-t(3, 0, 2.5): brms default, `student_t(3, 0, 2.5)` with a lower bound
+  of 0. 95% `r interval_text(sigma_priors[[3]])`; share above 1:
+  `r sprintf("%.2f", prior_share(sigma_priors[[3]], 1, Inf))`.
+
+## Prior predictive simulation
+
+### Prior sets
+
+```{r}
+#| label: prior-sets
+
+prior_sets <- list(
+  Weaker = prior_set(alpha = prior_normal(0, 1), beta = prior_normal(0, 1), sigma = prior_half_t(3, 2.5)),
+  Stronger = prior_set(alpha = prior_normal(0, 0.2), beta = prior_normal(0, 0.5), sigma = prior_exponential(1))
+)
+mu <- ~ alpha + beta * parent_ses_z
+
+prior_set_table(prior_sets)
+```
+
+- Weaker: the widest candidate for each parameter above; its residual SD
+  prior is the brms default.
+
+### Implied lines
+
+```{r}
+#| label: fig-prior-lines
+#| fig-width: 8
+#| fig-height: 3.5
+
+draws <- draw_priors(prior_sets, n = 4000)
+
+plot_prior_lines(draws, mu, x_label = "Family SES (SD)", y_label = "Expected adult SES (SD)")
+```
+
+### Simulated data
+
+```{r}
+#| label: fig-simulated
+#| fig-width: 10
+#| fig-height: 6
+
+students <- slice_sample(mobility, n = 200) |> select(parent_ses_z)
+simulated <- simulate_outcomes(draws, students, mu)
+
+plot_simulated(simulated, parent_ses_z, x_label = "Family SES (SD)", y_label = "Simulated adult SES (SD)")
+```
+
+- Family SES: real values for 200 students. Adult SES: simulated.
+
+### Implied outcome SD
+
+```{r}
+#| label: fig-outcome-sd
+#| fig-width: 7
+#| fig-height: 4
+
+stats <- simulated_stats(simulated, outcome_sd = sd(y))
+plot_simulated_stats(stats, reference = c(outcome_sd = 1), log_x = TRUE)
+```
+
+```{r}
+#| label: outcome-sd-summary
+
+outcome_sd_summary <- stats |>
+  summarise(median = median(outcome_sd), share_above_2 = mean(outcome_sd > 2), .by = set)
+outcome_sd_summary |> mutate(across(where(is.numeric), \(x) round(x, 2)))
+```
+
+- Outcome SD: the SD of simulated adult SES in each simulated data set.
+- Observed: adult SES is standardized with the sample's SD, so any data set
+  on this scale has an SD near 1.

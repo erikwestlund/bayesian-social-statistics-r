@@ -1,6 +1,6 @@
 # Download the HSLS:09 public-use file and its documentation from NCES.
 #
-# Run from the project root:  Rscript scripts/01_fetch_hsls.R
+# Run from the project root:  Rscript scripts/hsls/01_fetch.R
 #
 # By downloading, you accept the NCES data usage agreement: use the data for
 # statistical purposes only, make no attempt to identify anyone, and do not

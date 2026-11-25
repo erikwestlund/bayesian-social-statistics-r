@@ -1,0 +1,355 @@
+---
+title: "Posterior predictive checks"
+author:
+  - name: "Erik"
+    email: "ewestlund@jhu.edu"
+    url: "https://erik-westlund.academic.page"
+    affiliations:
+      - name: "Johns Hopkins Bloomberg School of Public Health"
+        department: "Department of Biostatistics"
+        city: "Baltimore"
+        country: "United States"
+date: "2026-11-18"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    code-fold: false
+    df-print: kable
+execute:
+  echo: true
+  warning: true
+  message: true
+  cache: false
+---
+
+A fitted model is also a generator of data. For each posterior draw, simulate a
+replicated data set: new follow-up scores for the same students, from the
+model with that draw's parameters. Together the replications form the posterior
+predictive distribution: the data the model expects, given what it learned. A
+posterior predictive check compares the observed data with the replications.
+Where the observed data look unlike the replications, the model misses
+something.
+
+The check never proves a model right. It finds the features of the data a model
+fails to reproduce, so the analyst can judge whether they matter for the
+question. The notebook runs the checks on simulated students, where the model is
+true by construction, and then on HSLS:09, using the draws saved by
+`05-sampling`.
+
+```{r}
+#| label: setup
+#| message: false
+
+library(framework)
+scaffold() # sources functions/bayes.R
+
+theme_set(theme_minimal(base_size = 11))
+okabe_ito <- unname(palette.colors(palette = "Okabe-Ito"))[c(6, 2, 4, 7, 3, 8, 5)]
+options(ggplot2.discrete.colour = okabe_ito, ggplot2.discrete.fill = okabe_ito)
+
+clean <- data_read(
+  "inputs.private.final.hsls_clean",
+  col_types = readr::cols(student_id = "c", .default = "d")
+)
+hsls <- analysis_sample(clean)
+regression <- bayes_model("regression")
+# Read every cell as text and keep empty cells as "", not NA
+crosswalk <- data_read(
+  "inputs.public.raw.hsls_crosswalk",
+  col_types = readr::cols(.default = "c"),
+  na = character()
+)
+
+hsls_draws <- load_model("hsls_regression_draws")
+settings <- load_model("hsls_regression_settings")
+if (settings$n != nrow(hsls)) {
+  stop("The saved draws come from a different sample. Rerun 05-sampling.")
+}
+
+# One seed for the simulated students and the replications
+set.seed(808)
+```
+
+## Test statistics
+
+A test statistic summarizes a data set in one number. The check computes it for
+the observed data and for each replication. The posterior predictive p-value is
+the share of replications whose statistic is at least as large as the observed
+one. Values near 0 or 1 mean the observed statistic is unusual under the model.
+A value in between means the check found no discrepancy for that statistic,
+which is weaker than saying the model is right about it. Statistics the model
+fits directly, such as the mean, tend to give values near 0.5 because the same
+data informed the fit.
+
+```{r}
+#| label: statistics
+
+# The SD and skewness divide by n, as NumPy's std and SciPy's skew do
+population_sd <- \(y) sqrt(mean((y - mean(y))^2))
+STATISTICS <- list(
+  "Mean" = mean,
+  "SD" = population_sd,
+  "Minimum" = min,
+  "Maximum" = max,
+  "Skewness" = \(y) mean((y - mean(y))^3) / population_sd(y)^3,
+  "5th percentile" = \(y) quantile(y, 0.05, names = FALSE),
+  "95th percentile" = \(y) quantile(y, 0.95, names = FALSE),
+  "Share above 70" = \(y) mean(y > 70)
+)
+
+# y_rep is a matrix with one replication per row
+check <- function(y, y_rep) {
+  rows <- lapply(names(STATISTICS), \(name) {
+    statistic <- STATISTICS[[name]]
+    replicated <- apply(y_rep, 1, statistic)
+    observed <- statistic(y)
+    data.frame(
+      Observed = observed,
+      `Replicated, median` = median(replicated),
+      `Replicated, 5%` = quantile(replicated, 0.05, names = FALSE),
+      `Replicated, 95%` = quantile(replicated, 0.95, names = FALSE),
+      `p-value` = mean(replicated >= observed),
+      row.names = name,
+      check.names = FALSE
+    )
+  })
+  do.call(rbind, rows)
+}
+
+overlay <- function(y, y_rep, title) {
+  replications <- tibble(
+    replication = rep(1:50, each = ncol(y_rep)),
+    value = as.vector(t(y_rep[1:50, ]))
+  )
+  ggplot() +
+    geom_density(aes(value, group = replication), replications, colour = okabe_ito[1], alpha = 0.15, linewidth = 0.3) +
+    geom_density(aes(y), tibble(y = y), colour = "black", linewidth = 1) +
+    labs(x = "Follow-up math score", y = "Density", title = title)
+}
+```
+
+## Simulated data
+
+The Stan program draws replications itself when `predict = 1`: its
+`generated quantities` block draws `y_rep` for every student at every draw. The
+cell fits 500 simulated students and takes the 4,000 by 500 matrix of
+replications out of the fit.
+
+```{r}
+#| label: fig-simulated
+#| fig-width: 7
+#| fig-height: 4
+
+fake <- simulate(500, 50.4, c(0.7, 1.8), 6.6)
+fake_fit <- bayes_sample(regression, stan_data(fake, WEAK, predict = TRUE))
+fake_rep <- unclass(posterior::as_draws_matrix(fake_fit$draws("y_rep")))
+cat(sprintf("y_rep: %s draws by %d students\n", format(nrow(fake_rep), big.mark = ","), ncol(fake_rep)))
+
+print(overlay(fake$w2_math, fake_rep, "Simulated data (black) and 50 replications (blue)"))
+# Every 4th draw: 1,000 replications spread evenly over the four chains
+round(check(fake$w2_math, fake_rep[seq(1, nrow(fake_rep), by = 4), ]), 3)
+```
+
+When the model is true, the observed statistics sit inside the spread of the
+replicated ones, and the p-values fall between 0 and 1 with no pattern. The
+statistics use 1,000 of the 4,000 replications, every fourth draw. With 1,000
+replications, a p-value near 0.5 has a simulation standard error of about
+0.016, so differences in the second decimal are noise.
+
+## HSLS:09
+
+For 18,623 students, Stan's `y_rep` would hold 4,000 × 18,623 values, about
+75 million. The replications are simple to draw outside Stan, with the same
+formula as the `generated quantities` block:
+$y^{\text{rep}}_i = \alpha + X_i \beta + \sigma \varepsilon_i$ with
+$\varepsilon_i \sim \text{Normal}(0, 1)$. The cell draws one replication for
+each of 400 posterior draws, chosen at random.
+
+```{r}
+#| label: fig-hsls
+#| fig-width: 7
+#| fig-height: 4
+
+x <- as.matrix(hsls[c("w1_math_c", "w1_ses")])
+y <- hsls$w2_math
+chosen <- slice_sample(hsls_draws, n = 400)
+mu <- chosen$alpha + as.matrix(chosen[c("beta[1]", "beta[2]")]) %*% t(x)
+y_rep <- mu + chosen$sigma * matrix(rnorm(length(mu)), nrow(mu))
+cat(sprintf("y_rep: %d draws by %s students\n", nrow(y_rep), format(ncol(y_rep), big.mark = ",")))
+
+overlay(y, y_rep, "HSLS:09 follow-up scores (black) and 50 replications (blue)")
+```
+
+```{r}
+#| label: hsls-check
+
+round(check(y, y_rep), 3)
+```
+
+The model reproduces the mean and SD, which a linear regression with an
+intercept fits by construction, and the upper part of the distribution: the
+95th percentile and the share above 70. The tails are where it fails:
+
+- **Minimum and maximum.** Every replication has a lower minimum and a higher
+  maximum than the observed scores. The observed minimum is about 8 points
+  above the median replicated minimum, and the observed maximum about 6 points
+  below the median replicated maximum. Normal errors have no bounds and the
+  test's scores do. `03-simulating-the-data` anticipated this.
+- **Lower tail.** The observed 5th percentile is below 399 of the 400
+  replicated ones, while the observed minimum is above all of them. More
+  students score in the low 30s than the model expects, and none score far
+  below that.
+- **Skewness.** The observed scores are slightly right-skewed, more than any
+  replication.
+
+The discrepancies are in the tails, so they matter most for questions about
+the lowest and highest scorers. They say the normal distribution is an
+approximation for this test score.
+
+## Spread across base-year scores
+
+The model assumes the same residual SD, $\sigma$, for every student. The check
+splits students into ten groups by base-year score and compares the SD of the
+follow-up score within each group with the same SD in the replications.
+
+```{r}
+#| label: fig-deciles
+#| fig-width: 7
+#| fig-height: 4
+
+deciles <- cut(hsls$w1_math, quantile(hsls$w1_math, 0:10 / 10), include.lowest = TRUE, labels = FALSE)
+observed_sd <- tapply(y, deciles, sd)
+replicated_sd <- t(apply(y_rep, 1, \(rep) tapply(rep, deciles, sd)))
+middle <- tapply(hsls$w1_math, deciles, median)
+
+spread <- tibble(
+  Decile = 1:10,
+  `Median base-year score` = as.vector(middle),
+  `Observed SD` = as.vector(observed_sd),
+  `Replicated SD, median` = apply(replicated_sd, 2, median),
+  low = apply(replicated_sd, 2, quantile, 0.05),
+  high = apply(replicated_sd, 2, quantile, 0.95)
+)
+print(
+  ggplot(spread, aes(`Median base-year score`)) +
+    geom_ribbon(aes(ymin = low, ymax = high, fill = "Replications, central 90%"), alpha = 0.4) +
+    geom_line(aes(y = `Observed SD`, colour = "Observed")) +
+    geom_point(aes(y = `Observed SD`, colour = "Observed")) +
+    scale_colour_manual(values = "black") +
+    labs(
+      x = "Base-year math score, median of the decile",
+      y = "SD of follow-up score within the decile",
+      colour = NULL,
+      fill = NULL,
+      title = "Spread of follow-up scores by base-year decile"
+    ) +
+    theme(legend.position = "bottom")
+)
+spread |>
+  select(-low, -high) |>
+  mutate(across(where(is.double), \(x) round(x, 2)))
+```
+
+The observed SD in the middle deciles scatters around the replicated SD. At the
+ends it does not. In the top decile, the observed SD is well below the
+replicated one: the model overpredicts the spread among the students who scored
+highest in the base year. A ceiling on the follow-up test is one explanation,
+since it would bunch top scorers together; the check alone cannot confirm it. The replicated SD rises
+in the outer deciles because those deciles span a wider range of base-year
+scores, and the model passes that range on to the expected follow-up score. The
+observed SD does not rise at the top. A model with a residual SD that varies
+with the base-year score, or an outcome model with bounds, might fit better;
+it would need the same check.
+
+## Group means the model leaves out
+
+The model has no term for race and ethnicity. If groups differ in follow-up
+scores beyond what base-year math and SES predict, the replications will miss
+their means. The check compares each group's observed mean follow-up score with
+the replicated means for the same students. Missing race is its own group.
+
+```{r}
+#| label: race
+
+race_labels <- crosswalk_labels(crosswalk$labels[crosswalk$name == "w1_race"])
+race <- race_labels[as.character(hsls$w1_race)]
+race[is.na(race)] <- "Missing"
+race <- factor(race)
+
+# Each replication's group means: the replications times a matrix that
+# averages the students in each group
+counts <- table(race)
+averaging <- outer(as.integer(race), seq_along(levels(race)), "==") / rep(as.vector(counts), each = length(race))
+replicated_mean <- y_rep %*% averaging
+observed_mean <- as.vector(y %*% averaging)
+
+groups <- tibble(
+  Group = levels(race),
+  Students = as.vector(counts),
+  `Observed mean` = observed_mean,
+  `Replicated, 5%` = apply(replicated_mean, 2, quantile, 0.05),
+  `Replicated, 95%` = apply(replicated_mean, 2, quantile, 0.95),
+  `p-value` = colMeans(sweep(replicated_mean, 2, observed_mean, ">="))
+) |>
+  arrange(desc(Students))
+mutate(groups, across(where(is.double), \(x) round(x, 2)))
+```
+
+```{r}
+#| label: fig-race
+#| fig-width: 8
+#| fig-height: 4.5
+
+groups |>
+  mutate(label = fct_rev(fct_inorder(sprintf("%s (n = %s)", Group, format(Students, big.mark = ","))))) |>
+  ggplot(aes(y = label)) +
+  geom_segment(
+    aes(x = `Replicated, 5%`, xend = `Replicated, 95%`, colour = "Replications, central 90%"),
+    linewidth = 4, alpha = 0.4
+  ) +
+  geom_point(aes(x = `Observed mean`, colour = "Observed")) +
+  scale_colour_manual(values = c("Replications, central 90%" = okabe_ito[1], "Observed" = "black")) +
+  labs(x = "Mean follow-up math score", y = NULL, colour = NULL, title = "Group means: observed and replicated") +
+  theme(legend.position = "bottom", axis.text.y = element_text(size = 8))
+```
+
+Two groups fall outside the replicated band. The model underpredicts the mean
+follow-up score of Asian students and overpredicts that of Black students,
+given each group's own base-year math and SES. These are prediction errors for
+group averages, not adjusted comparisons between groups: an estimate of how
+groups differ at the same base-year math and SES needs a model with group
+terms and a stated set of covariate values to compare at. A relationship that
+is not linear could also produce errors like these, since the groups differ
+in their base-year scores and SES. The other groups fall inside or at the edge
+of their bands, and the small groups have wide bands. Whether to add race to
+the model depends on the question. For describing how relative standing
+persists, the misfit says one regression line averages over groups it does
+not fit equally well. That is a substantive finding, not only a technical one.
+
+## Predictions for one student
+
+The posterior predictive distribution also answers a question the posterior
+summary does not: what score to expect for one new student. For a student with a
+base-year score of 50 and SES of 0, the cell compares two intervals:
+
+- the 90% interval for the expected score, the average over all such students,
+  which reflects uncertainty about the parameters only;
+- the 90% predictive interval for one student's score, which adds the
+  student-level variation $\sigma$.
+
+```{r}
+#| label: one-student
+
+expected <- hsls_draws$alpha
+predicted <- expected + hsls_draws$sigma * rnorm(length(expected))
+round(data.frame(
+  rbind(interval(expected, 0.9), interval(predicted, 0.9)),
+  row.names = c("Expected score, average student", "Score of one student")
+) |> setNames(c("5%", "95%")), 2)
+```
+
+The expected score is known to within a fraction of a point. One student's
+score is not: the predictive interval spans about 22 points. With this much
+data, almost all the uncertainty in a prediction for an individual comes from
+the variation between students, not from the parameters.

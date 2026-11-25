@@ -1,0 +1,303 @@
+---
+title: "Sampling the posterior"
+author:
+  - name: "Erik"
+    email: "ewestlund@jhu.edu"
+    url: "https://erik-westlund.academic.page"
+    affiliations:
+      - name: "Johns Hopkins Bloomberg School of Public Health"
+        department: "Department of Biostatistics"
+        city: "Baltimore"
+        country: "United States"
+date: "2026-11-18"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    code-fold: false
+    df-print: kable
+execute:
+  echo: true
+  warning: true
+  message: true
+  cache: false
+---
+
+This notebook follows the data through one Stan fit: what goes in, what the
+sampler does with it, and what comes out. It runs first on simulated students,
+then on HSLS:09, and saves the HSLS:09 draws for the notebooks on posterior
+summaries and posterior predictive checks.
+
+Stan samples with Hamiltonian Monte Carlo (HMC), using the No-U-Turn Sampler
+(NUTS) variant. It treats the log posterior density as a landscape and moves a
+particle across it, so successive draws can land far apart while staying in
+regions of high posterior density. Each chain starts at a random point, adapts
+its step size and a scaling of the parameters during warmup, and then records
+draws.
+
+```{r}
+#| label: setup
+#| message: false
+
+library(framework)
+scaffold() # sources functions/bayes.R
+
+theme_set(theme_minimal(base_size = 11))
+okabe_ito <- unname(palette.colors(palette = "Okabe-Ito"))[c(6, 2, 4, 7, 3, 8, 5)]
+options(ggplot2.discrete.colour = okabe_ito, ggplot2.discrete.fill = okabe_ito)
+
+clean <- data_read(
+  "inputs.private.final.hsls_clean",
+  col_types = readr::cols(student_id = "c", .default = "d")
+)
+hsls <- analysis_sample(clean)
+regression <- bayes_model("regression")
+
+# One seed for the simulated students
+set.seed(505)
+```
+
+## The Stan program
+
+The model is in `stan/regression.stan`, shared with the Python project. A Stan
+program declares its inputs in `data`, its unknowns in `parameters`, the log
+density in `model`, and anything computed from each draw in
+`generated quantities`.
+
+```{r}
+#| label: program
+
+cat(readLines("stan/regression.stan"), sep = "\n")
+```
+
+## Data in
+
+Stan takes a named list whose names match the `data` block. `stan_data()`
+builds it from a data frame. The cell builds it for 1,000 simulated students
+and shows each entry's type and shape, not its values.
+
+```{r}
+#| label: data-in
+
+truth <- list(alpha = 50.4, beta = c(0.7, 1.8), sigma = 6.6)
+fake <- simulate(1000, truth$alpha, truth$beta, truth$sigma)
+fake_data <- stan_data(fake, WEAK)
+
+describe <- function(data) {
+  rows <- lapply(names(data), \(key) {
+    value <- data[[key]]
+    scalar <- is.null(dim(value)) && length(value) == 1
+    data.frame(
+      Type = if (is.integer(value)) "integer" else "real",
+      Shape = if (scalar) "scalar" else paste(dim(value) %||% length(value), collapse = " x "),
+      Value = if (scalar) {
+        format(value)
+      } else if (length(value) <= 2) {
+        paste0("[", paste(round(value, 2), collapse = ", "), "]")
+      } else {
+        "(array)"
+      },
+      row.names = key
+    )
+  })
+  do.call(rbind, rows)
+}
+
+describe(fake_data)
+```
+
+`X` holds the two predictors, base-year math minus 50 and SES as supplied, one
+row per student, and `y` the
+follow-up scores. The rest are switches and prior settings, explained in the
+comments of the Stan program. Stan checks the list against the `data`
+block: a wrong shape, or a value outside a declared bound, such as a negative
+`N`, stops the fit before sampling starts.
+
+## Sampling
+
+`bayes_sample()` runs four chains of 1,000 warmup and 1,000 sampling iterations
+each, in parallel. The cell also keeps the warmup draws, which are normally
+discarded, to show the adaptation.
+
+```{r}
+#| label: sampling
+
+start <- Sys.time()
+fake_fit <- bayes_sample(regression, fake_data, save_warmup = TRUE)
+cat(sprintf("Sampling took %.1f seconds\n", as.numeric(difftime(Sys.time(), start, units = "secs"))))
+cat(sprintf("Output files: %d CSV files, one per chain\n", length(fake_fit$output_files())))
+```
+
+## Draws out
+
+Stan writes one CSV file per chain. Each row is one iteration. The first
+columns, ending in two underscores, describe the sampler. The rest are the
+parameters and generated quantities.
+
+| Column | Meaning |
+|---|---|
+| `lp__` | Log posterior density at the draw, up to a constant |
+| `accept_stat__` | Average acceptance probability of the trajectory |
+| `stepsize__` | Step size of the trajectory, fixed after warmup |
+| `treedepth__` | Depth of the trajectory tree; 2 to the depth bounds the number of steps |
+| `n_leapfrog__` | Number of steps in the trajectory |
+| `divergent__` | 1 when the trajectory diverged, a sign of a region the sampler cannot explore accurately |
+| `energy__` | Hamiltonian energy, used by the E-BFMI diagnostic |
+
+```{r}
+#| label: draws-out
+
+# cmdstanr returns the sampler columns and the parameters separately. Bound
+# side by side, they hold the same columns as the CSV files.
+all_draws <- function(fit, inc_warmup = FALSE) {
+  sampler <- posterior::as_draws_df(fit$sampler_diagnostics(inc_warmup = inc_warmup))
+  parameters <- posterior::as_draws_df(fit$draws(inc_warmup = inc_warmup))
+  tibble(
+    chain__ = sampler$.chain,
+    iter__ = sampler$.iteration,
+    draw__ = sampler$.draw,
+    lp__ = parameters$lp__,
+    !!!as.list(as.data.frame(sampler)[fit$sampler_diagnostics() |> posterior::variables()]),
+    !!!as.list(as.data.frame(parameters)[c("alpha", "beta[1]", "beta[2]", "sigma")])
+  )
+}
+
+fake_draws <- all_draws(fake_fit)
+cat(sprintf("%s rows: 4 chains of 1,000 draws\n", format(nrow(fake_draws), big.mark = ",")))
+fake_draws |>
+  head(5) |>
+  mutate(across(where(is.double), \(x) round(x, 3)))
+```
+
+```{r}
+#| label: draws-array
+
+# The same draws as an array: iterations by chains by columns. cmdstanr keeps
+# the sampler columns in a second array, fake_fit$sampler_diagnostics().
+array <- fake_fit$draws()
+cat("Array dimensions:", paste(dim(array), collapse = " x "), "\n")
+cat("Columns:", paste(posterior::variables(array), collapse = ", "), "\n")
+cat("Sampler columns:", paste(posterior::variables(fake_fit$sampler_diagnostics()), collapse = ", "), "\n")
+```
+
+## Warmup
+
+During warmup, each chain moves from its random start toward the region of high
+posterior density and tunes its step size. The left panel shows the SES slope
+over all 2,000 iterations of each chain; the dashed line marks the end of
+warmup. The right panel shows the step size, which settles during warmup and
+stays fixed after it.
+
+```{r}
+#| label: fig-warmup
+#| fig-width: 12
+#| fig-height: 3.8
+
+with_warmup <- all_draws(fake_fit, inc_warmup = TRUE) |>
+  mutate(Chain = paste("Chain", chain__))
+
+ses_panel <- ggplot(with_warmup, aes(iter__, `beta[2]`, colour = Chain)) +
+  geom_line(linewidth = 0.25) +
+  geom_vline(xintercept = 1000, linetype = "dashed") +
+  geom_hline(yintercept = truth$beta[2]) +
+  labs(x = "Iteration", y = "SES slope", colour = NULL, title = "SES slope, warmup and sampling (solid line: true value)") +
+  theme(legend.position = "inside", legend.position.inside = c(0.98, 0.98), legend.justification = c(1, 1))
+
+step_panel <- ggplot(with_warmup, aes(iter__, stepsize__, colour = Chain)) +
+  geom_line(linewidth = 0.4, show.legend = FALSE) +
+  geom_vline(xintercept = 1000, linetype = "dashed") +
+  scale_y_log10() +
+  labs(x = "Iteration", y = "Step size (log scale)", title = "Step size")
+
+arrange_plots(list(ses_panel, step_panel), ncol = 2)
+```
+
+```{r}
+#| label: early-warmup
+
+# Early warmup iterations of each chain, on the way to the posterior
+with_warmup |>
+  filter(iter__ %in% c(1, 5, 10, 25, 50, 100, 150, 200, 300)) |>
+  select(chain__, iter__, lp__, alpha, `beta[1]`, `beta[2]`, sigma) |>
+  mutate(across(where(is.double), \(x) round(x, 2)))
+```
+
+Stan starts each chain at random values between −2 and 2 on the unconstrained
+scale, so the intercept starts near 0, about 50 points from the posterior, and
+$\sigma$ starts near 1. The first proposals are often rejected, so a chain can
+stay at its starting point for several iterations. The table shows the chains
+climbing toward the posterior, with `lp__` rising by orders of magnitude. In
+this run, chains 2 and 4 reach the region of the final draws by iteration 50,
+and chains 1 and 3 by iteration 100. Reaching that region is not convergence: the diagnostics in
+`06-diagnostics` check that the chains, after warmup, agree with one another.
+Warmup runs longer than the climb, because tuning the step size and the
+parameter scaling takes longer than finding the posterior. None of the warmup
+draws are used for inference.
+
+## HSLS:09
+
+The same steps on the 18,623 HSLS:09 students, with the weak priors. The draws
+for the parameters go to the private models folder with `save_model()`, which
+records the file in the project database. `07-posterior-summary` and
+`08-posterior-predictive` read them back with `load_model()`.
+
+```{r}
+#| label: hsls-data
+
+hsls_data <- stan_data(hsls, WEAK)
+describe(hsls_data)
+```
+
+```{r}
+#| label: hsls-sampling
+
+start <- Sys.time()
+hsls_fit <- bayes_sample(regression, hsls_data)
+cat(sprintf("Sampling took %.1f seconds\n", as.numeric(difftime(Sys.time(), start, units = "secs"))))
+```
+
+```{r}
+#| label: save
+
+hsls_draws <- draws(hsls_fit)
+saved <- save_model(hsls_draws, "hsls_regression_draws")
+
+# What else a reader of the draws needs: the priors and how the predictors
+# were centered, so a later notebook can rebuild predictions on the score scale
+settings <- list(
+  model = "stan/regression.stan",
+  n = nrow(hsls),
+  predictors = PREDICTORS,
+  w1_math_center = 50,
+  priors = WEAK,
+  chains = 4,
+  iter_warmup = 1000,
+  iter_sampling = 1000
+)
+save_model(settings, "hsls_regression_settings")
+cat(sprintf("Saved %s draws to %s\n", format(nrow(hsls_draws), big.mark = ","), saved))
+print(jsonlite::toJSON(settings, pretty = TRUE, auto_unbox = TRUE, digits = NA))
+```
+
+```{r}
+#| label: fig-marginals
+#| fig-width: 14
+#| fig-height: 3.2
+
+hsls_draws |>
+  pivot_longer(c(alpha, `beta[1]`, `beta[2]`, sigma), names_to = "parameter") |>
+  ggplot(aes(value)) +
+  geom_histogram(bins = 50, fill = okabe_ito[1]) +
+  facet_wrap(~parameter, nrow = 1, scales = "free") +
+  labs(
+    x = NULL,
+    y = "Draws",
+    title = sprintf("Marginal posterior draws, HSLS:09 (n = %s, 4,000 draws)", format(nrow(hsls), big.mark = ","))
+  )
+```
+
+Each histogram shows one parameter's 4,000 draws. Together the draws are a
+sample from the joint posterior: every summary in the later notebooks, from a
+mean to a predicted score for a new student, is a calculation done once per
+draw and then summarized across draws. `06-diagnostics` checks whether the
+draws are trustworthy before anything is summarized.

@@ -1,7 +1,7 @@
 {
   "spec_version": 1,
   "name": "bayesian-social-statistics-r",
-  "type": "project_sensitive",
+  "type": "project",
   "language": "r",
   "core_files": true,
   "settings_layout": "split",
@@ -158,7 +158,7 @@
     "storage_buckets": {}
   },
   "security": {
-    "sensitive": true
+    "sensitive": false
   },
   "env": {
     "POSTGRES_HOST": "",

@@ -192,3 +192,8 @@ framework.db-shm
 # NCES documentation for HSLS:09. The fetch scripts download it; the PDFs are
 # public but large, so they stay out of git.
 /inputs/public/raw/hsls_docs/
+/inputs/public/raw/els_docs/
+
+# Compiled Stan programs: keep the .stan sources only
+/stan/*
+!/stan/*.stan

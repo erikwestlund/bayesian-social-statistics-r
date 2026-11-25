@@ -1,4 +1,4 @@
-# Helpers for reading the HSLS:09 crosswalk (inputs/public/raw/hsls_crosswalk.csv)
+# Helpers for reading the HSLS:09 and ELS:2002 crosswalks (inputs/public/raw/*_crosswalk.csv)
 
 # "-9;-8" as c(-9, -8). An empty cell gives no codes.
 crosswalk_codes <- function(text) {
