@@ -7,8 +7,8 @@
 # link it to individually identifiable data.
 #
 # shared/data_locations.csv lists every file, with its SHA-256. The data go
-# under inputs/private/raw and stay out of git. The documentation goes under
-# inputs/public/raw, which git also ignores because the PDFs are large.
+# under inputs/raw and stay out of git. The documentation goes under
+# inputs/raw, which git also ignores because the PDFs are large.
 
 library(framework)
 scaffold()

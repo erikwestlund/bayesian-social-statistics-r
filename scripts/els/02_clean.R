@@ -16,13 +16,13 @@ scaffold()
 
 # Read every cell as text and keep empty cells as "", not NA
 data_spec <- data_read(
-  "inputs.public.raw.els_data_spec",
+  "inputs.raw.els_data_spec",
   col_types = readr::cols(.default = "c"),
   na = character()
 )
 
 raw <- data_read(
-  "inputs.private.raw.els_student",
+  "inputs.raw.els_student",
   col_select = unique(c(data_spec$nces, "SCH_ID")),
   col_types = readr::cols(STU_ID = "c", .default = "d")
 )
@@ -78,7 +78,7 @@ stopifnot(identical(is.na(clean$w2_math), clean$w2_test_status %in% c(0, 4)),
 by_names <- paste0("BYSTU", 1:200)
 f1_names <- paste0("F1PNL", 1:200)
 replicates <- data_read(
-  "inputs.private.raw.els_brr",
+  "inputs.raw.els_brr",
   col_select = c("STU_ID", by_names, f1_names),
   col_types = readr::cols(STU_ID = "c", .default = "d")
 )
@@ -89,5 +89,5 @@ stopifnot(all(vapply(weights, function(x) all(is.finite(x) & x >= 0), logical(1)
 names(weights) <- c(paste0("w1_weight_rep", 1:200), paste0("w2_weight_panel_rep", 1:200))
 clean <- bind_cols(clean, weights)
 
-data_save(clean, "inputs/private/final/els_clean.csv")
+data_save(clean, "inputs/final/els_clean.csv")
 message(format(nrow(clean), big.mark = ","), " students, ", ncol(clean), " variables")

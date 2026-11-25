@@ -47,7 +47,7 @@ okabe_ito <- unname(palette.colors(palette = "Okabe-Ito"))[c(6, 2, 4, 7, 3, 8, 5
 options(ggplot2.discrete.colour = okabe_ito, ggplot2.discrete.fill = okabe_ito)
 
 clean <- data_read(
-  "inputs.private.final.hsls_clean",
+  "inputs.final.hsls_clean",
   col_types = readr::cols(student_id = "c", .default = "d")
 )
 hsls <- analysis_sample(clean)

@@ -13,7 +13,7 @@ standardize <- function(x) (x - mean(x)) / sd(x)
 # els_clean is built by scripts/els/02_clean.R.
 read_mobility <- function() {
   els <- data_read(
-    "inputs.private.final.els_clean",
+    "inputs.final.els_clean",
     col_select = c("student_id", "w1_ses", "w4_ses"),
     col_types = readr::cols(student_id = "c", .default = "d")
   )

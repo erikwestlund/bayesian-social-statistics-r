@@ -42,7 +42,7 @@ missing-data, covariate-balance, correlation, and imputation tables are
 unweighted.
 
 Because this notebook reads private data (`inputs.private.*`), rendered output
-is written to `outputs/private/notebooks` and reports aggregate statistics only.
+is written to `outputs/notebooks` and reports aggregate statistics only.
 
 ```{r}
 #| label: setup
@@ -56,16 +56,16 @@ okabe_ito <- c(blue = "#0072B2", orange = "#E69F00", green = "#009E73")
 
 # Read every cell as text and keep empty cells as "", not NA
 data_spec <- data_read(
-  "inputs.public.raw.hsls_data_spec",
+  "inputs.raw.hsls_data_spec",
   col_types = readr::cols(.default = "c"),
   na = character()
 )
 clean <- data_read(
-  "inputs.private.final.hsls_clean",
+  "inputs.final.hsls_clean",
   col_types = readr::cols(student_id = "c", .default = "d")
 )
 raw <- data_read(
-  "inputs.private.raw.hsls_student",
+  "inputs.raw.hsls_student",
   col_select = unique(data_spec$nces),
   col_types = readr::cols(STU_ID = "c", .default = "d")
 )

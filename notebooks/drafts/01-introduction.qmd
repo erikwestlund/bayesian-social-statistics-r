@@ -415,7 +415,7 @@ plot_dag(dag_missing, dag_labels)
 #| label: missing-items
 
 items <- data_read(
-  "inputs.private.final.els_clean",
+  "inputs.final.els_clean",
   col_select = c("w1_parent_responded", "w1_parent1_edu", "w1_parent1_occ", "w1_math_efficacy_a"),
   col_types = readr::cols(.default = "d")
 )

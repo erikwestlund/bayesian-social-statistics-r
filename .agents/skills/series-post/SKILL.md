@@ -25,7 +25,7 @@ in the series.
   folder of numbered steps and a runner: `scripts/clean_els.R` runs
   `scripts/els/01_fetch.R` and `scripts/els/02_clean.R`, driven by
   `shared/data_spec/els.csv`, and the result lands in
-  `inputs/private/final/els_clean.csv`. HSLS:09 follows the same pattern
+  `inputs/final/els_clean.csv`. HSLS:09 follows the same pattern
   (`scripts/clean_hsls.R`, `scripts/hsls/`). The Python and Stata projects
   have the same steps (`scripts/els/*.py`, `do/els/*.do`) from the same
   data spec, and must build the same values: compare each port's
@@ -88,7 +88,7 @@ change.
 - Each page makes one point from the post.
 - All state is in the URL, so the post can link to an exact example.
 - The lab loads the cleaned files this project writes, such as
-  `inputs/private/final/els_clean.csv`. It does not clean data itself.
+  `inputs/final/els_clean.csv`. It does not clean data itself.
 - Each page's default state reproduces a number in the R notebook. Record the
   reference numbers and check them in the lab's tests.
 - When the lab simplifies the model, such as fixing the residual SD to get an

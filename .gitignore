@@ -1,38 +1,19 @@
-# Framework (Privacy-First Mode)
-# ================================================================================
-# This project uses Framework's privacy-first structure.
-# All */private/ directories are gitignored by default.
-# Only */public/ directories can be committed after explicit review.
+# What stays out of git, and why
 #
-# WORKFLOW:
-#   1. Sensitive/raw data goes in */private/ directories (NEVER committed)
-#   2. De-identified/aggregated data goes in */public/ directories (safe to commit)
-#   3. Analysis scripts are committed, but outputs are carefully controlled
-#
-# CRITICAL: Private directories are NEVER committed to version control.
-# ================================================================================
-
-# ============================================================================
-# SENSITIVE DATA - NEVER COMMIT
-# ============================================================================
-
-# Private directories - explicit paths for this project type
-/inputs/private/
-/reference/private/
-/outputs/private/
-
-# Generic private directory patterns (defense-in-depth)
-**/private/**
-**/*_private/**
-**/sensitive/**
-
-# Allow structure documentation (README and .gitkeep files in private dirs)
-!/inputs/**/README.md
-!/inputs/**/.gitkeep
-!/reference/**/README.md
-!/reference/**/.gitkeep
-!/outputs/**/README.md
-!/outputs/**/.gitkeep
+# The NCES data: each user downloads them with scripts/*/01_fetch and accepts the
+# NCES data usage agreement, and the files are large.
+/inputs/raw/els/
+/inputs/raw/hsls/
+# The NCES documentation PDFs: large, and NCES hosts them. shared/
+# data_locations.csv records where each one comes from.
+/inputs/raw/els_docs/
+/inputs/raw/hsls_docs/
+# Files built from the raw data by scripts/*/02_clean: large, and anyone can rebuild
+# them.
+/inputs/intermediate/
+/inputs/final/
+# Rendered notebooks, figures, tables, and models: rebuilt from the code.
+/outputs/
 
 # ============================================================================
 # SECRETS AND CREDENTIALS - NEVER COMMIT
@@ -163,9 +144,7 @@ ehthumbs.db
 *~
 
 # --- from base framework/project_sensitive v5 ---
-# Private data and credentials
-**/private/**
-**/*_private/**
+# Credentials
 .env
 .env.*
 !.env.example
@@ -179,20 +158,8 @@ framework.db-wal
 framework.db-shm
 .DS_Store
 
-# Sensitive project folders
-/inputs/private/
-/reference/private/
-/outputs/private/
-**/sensitive/**
-
 # Run logs
 /logs/
-
-
-# NCES documentation for HSLS:09. The fetch scripts download it; the PDFs are
-# public but large, so they stay out of git.
-/inputs/public/raw/hsls_docs/
-/inputs/public/raw/els_docs/
 
 # Compiled Stan programs: keep the .stan sources only
 /stan/*

@@ -29,13 +29,13 @@ scaffold()
 
 # Read every cell as text and keep empty cells as "", not NA
 data_spec <- data_read(
-  "inputs.public.raw.hsls_data_spec",
+  "inputs.raw.hsls_data_spec",
   col_types = readr::cols(.default = "c"),
   na = character()
 )
 
 raw <- data_read(
-  "inputs.private.raw.hsls_student",
+  "inputs.raw.hsls_student",
   col_select = unique(data_spec$nces),
   col_types = readr::cols(STU_ID = "c", .default = "d")
 )
@@ -68,5 +68,5 @@ for (i in seq_len(nrow(data_spec))) {
   clean[[row$name]] <- column
 }
 
-data_save(clean, "inputs/private/final/hsls_clean.csv")
+data_save(clean, "inputs/final/hsls_clean.csv")
 message(format(nrow(clean), big.mark = ","), " students, ", ncol(clean), " variables")

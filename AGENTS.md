@@ -6,7 +6,7 @@ skills listed below. Edit the sections without regeneration markers freely -
 they won't be overwritten.
 
 
-This project uses public-use data (HSLS:09 and ELS:2002 from NCES). It is a standard Framework project, not a sensitive one. The data files and rendered outputs stay in the `private/` folders only to keep them out of git; `.gitignore` excludes them. Never print individual rows; summaries, models, and figures are fine.
+This project uses public-use data (HSLS:09 and ELS:2002 from NCES). It is a standard Framework project, not a sensitive one. `.gitignore` keeps the NCES files, the cleaned data, and rendered outputs out of git, and says why for each. Never print individual rows; summaries, models, and figures are fine.
 
 ## Skills
 
@@ -41,7 +41,8 @@ Start each notebook and script with `scaffold()`. It:
 3. Installs missing packages listed in the settings
 4. Attaches packages marked `auto_attach: true`
 5. Sources the functions in `functions/`
-6. Sets the random seed to 123
+6. Sets the random seed to 2026
+7. Sets the ggplot2 theme to `theme_minimal()`
 
 ### Conventions
 
@@ -50,7 +51,6 @@ Start each notebook and script with `scaffold()`. It:
 - Prefer the project's seed. When an operation needs its own seed, say why in a comment.
 - Ask before running a database statement that changes data.
 - Ask before publishing anything public. GitHub Pages is public even from a private repository.
-
 
 ## Installed Packages <!-- @framework:regenerate -->
 
@@ -66,23 +66,20 @@ of each file. This project's data directories:
 
 | Purpose | Directory |
 |---------|-----------|
-| Private raw data | `inputs/private/raw/` |
-| Public raw data | `inputs/public/raw/` |
-| Private intermediate | `inputs/private/intermediate/` |
-| Public intermediate | `inputs/public/intermediate/` |
-| Private analysis-ready | `inputs/private/final/` |
-| Public analysis-ready | `inputs/public/final/` |
-| Private tables | `outputs/private/tables/` |
-| Public tables | `outputs/public/tables/` |
-| Private figures | `outputs/private/figures/` |
-| Public figures | `outputs/public/figures/` |
+| Raw data (immutable) | `inputs/raw/` |
+| Intermediate/cleaned data | `inputs/intermediate/` |
+| Analysis-ready data | `inputs/final/` |
+| Output tables | `outputs/tables/` |
+| Output figures | `outputs/figures/` |
+| Saved models | `outputs/models/` |
+| Reports | `outputs/reports/` |
 
+## Data Out of Git
 
-## Private Folders
-
-This project was created as privacy sensitive. Private files go in the
-`private/` folders, which Git ignores. The `framework-sensitive-data` skill
-describes the folders and the checks Framework runs.
+Nothing in this project is confidential. `.gitignore` names each folder that
+stays out of git and why: the NCES downloads (`inputs/raw/els/`,
+`inputs/raw/hsls/`) and documentation PDFs, the cleaned data
+(`inputs/intermediate/`, `inputs/final/`), and rendered outputs (`outputs/`).
 
 
 ## Project Notes
