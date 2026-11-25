@@ -30,8 +30,8 @@ distributions for continuous and categorical variables, missing-value
 classifications, joint missingness patterns, covariate differences between
 observed and missing cases, pairwise correlations, and variance across
 socioeconomic status (SES) imputations. Value labels and NCES reserve codes are
-documented in `docs/codebook.md`, and missing-data coding rules are documented
-in `docs/missing-data.md`.
+documented in `shared/docs/codebook.md`, and missing-data coding rules are documented
+in `shared/docs/missing-data.md`.
 
 All student counts are unweighted record counts in `hsls_clean`. Sample-level
 shares use all records in `hsls_clean` as the denominator, whereas univariate
@@ -55,8 +55,8 @@ theme_set(theme_minimal(base_size = 11))
 okabe_ito <- c(blue = "#0072B2", orange = "#E69F00", green = "#009E73")
 
 # Read every cell as text and keep empty cells as "", not NA
-crosswalk <- data_read(
-  "inputs.public.raw.hsls_crosswalk",
+data_spec <- data_read(
+  "inputs.public.raw.hsls_data_spec",
   col_types = readr::cols(.default = "c"),
   na = character()
 )
@@ -66,25 +66,25 @@ clean <- data_read(
 )
 raw <- data_read(
   "inputs.private.raw.hsls_student",
-  col_select = unique(crosswalk$nces),
+  col_select = unique(data_spec$nces),
   col_types = readr::cols(STU_ID = "c", .default = "d")
 )
 
 # Missing-value reasons compare raw and clean values row by row
 stopifnot(identical(raw$STU_ID, clean$student_id))
-reasons <- missing_reasons(raw, clean, crosswalk)
-labels <- setNames(crosswalk$label, crosswalk$name)
-waves <- setNames(crosswalk$wave, crosswalk$name)
+reasons <- missing_reasons(raw, clean, data_spec)
+labels <- setNames(data_spec$label, data_spec$name)
+waves <- setNames(data_spec$wave, data_spec$name)
 sprintf("%s students, %d variables", format(nrow(clean), big.mark = ","), ncol(clean))
 ```
 
 ## Variable overview
 
 The table below lists every column in `hsls_clean`. Variable labels, survey
-waves, and measurement types come from `hsls_crosswalk`, while `Data type`
+waves, and measurement types come from `hsls_data_spec`, while `Data type`
 reports the storage type in `hsls_clean`: `student_id` is stored as character
 and all other variables are numeric, with binary, categorical, and ordinal
-variables stored as integer codes mapped to labels in the crosswalk.
+variables stored as integer codes mapped to labels in the data spec.
 `Distinct observed` and `Observed` count non-missing records only;
 `Missing (% of sample)` is the unweighted percentage of all students in
 `hsls_clean` with a missing value on that variable.
@@ -93,14 +93,14 @@ variables stored as integer codes mapped to labels in the crosswalk.
 #| label: tbl-variables
 
 tibble(
-  Variable = crosswalk$name,
-  Label = crosswalk$label,
-  Wave = crosswalk$wave,
-  Type = crosswalk$type,
-  `Data type` = vapply(clean[crosswalk$name], \(x) class(x)[1], ""),
-  `Distinct observed` = vapply(clean[crosswalk$name], \(x) n_distinct(x, na.rm = TRUE), 0L),
-  Observed = colSums(!is.na(clean[crosswalk$name])),
-  `Missing (% of sample)` = round(colMeans(is.na(clean[crosswalk$name])) * 100, 1)
+  Variable = data_spec$name,
+  Label = data_spec$label,
+  Wave = data_spec$wave,
+  Type = data_spec$type,
+  `Data type` = vapply(clean[data_spec$name], \(x) class(x)[1], ""),
+  `Distinct observed` = vapply(clean[data_spec$name], \(x) n_distinct(x, na.rm = TRUE), 0L),
+  Observed = colSums(!is.na(clean[data_spec$name])),
+  `Missing (% of sample)` = round(colMeans(is.na(clean[data_spec$name])) * 100, 1)
 )
 ```
 
@@ -149,7 +149,7 @@ as.data.frame.matrix(responses)
 
 ## Continuous variable distributions
 
-For each continuous variable in `hsls_crosswalk`, unweighted summary statistics
+For each continuous variable in `hsls_data_spec`, unweighted summary statistics
 (`Unweighted mean`, `Unweighted SD`, extrema, and percentiles) are computed over
 all students with a non-missing value on that variable (`Observed`), where
 `Unweighted SD` is the sample standard deviation. `Weighted mean` and
@@ -163,7 +163,7 @@ degrees-of-freedom adjustment).
 ```{r}
 #| label: tbl-continuous
 
-continuous <- crosswalk$name[crosswalk$type == "continuous"]
+continuous <- data_spec$name[data_spec$type == "continuous"]
 weight_for <- setNames(ifelse(waves[continuous] == "2", "w2_weight_panel", "w1_weight"), continuous)
 
 lapply(continuous, \(name) {
@@ -226,7 +226,7 @@ ggplot(values, aes(value)) +
 ## Categorical variable frequencies
 
 The frequency table summarizes all binary, categorical, and ordinal variables
-in `hsls_crosswalk` other than the survey response indicators tabulated above.
+in `hsls_data_spec` other than the survey response indicators tabulated above.
 For each variable, `Students` and `Unweighted (%)` are computed over all
 students with a non-missing value on that variable. `Weighted (%)` is the
 category's percentage of total positive weight among students with both a
@@ -239,7 +239,7 @@ weight (`w1_weight`) for all remaining variables.
 #| label: tbl-categorical
 
 # Survey response flags are reported in the sample table above
-categorical <- crosswalk |>
+categorical <- data spec |>
   filter(type %in% c("binary", "categorical", "ordinal"), !name %in% flags)
 parent_items <- categorical$name[str_detect(categorical$nces, "^(X1PAR|X1P2|X1FAM)")]
 
@@ -247,7 +247,7 @@ value_label <- function(row, values) {
   if (row$derive == "applies") {
     named <- c("0" = "Logical skip in the source variable", "1" = "Answered")
   } else {
-    named <- crosswalk_labels(row$labels)
+    named <- data_spec_labels(row$labels)
     if (length(named) == 0 && row$type == "binary") {
       named <- c("0" = "No", "1" = "Yes")
     }

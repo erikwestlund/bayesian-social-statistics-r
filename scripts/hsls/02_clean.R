@@ -2,12 +2,12 @@
 #
 # Run from the project root:  Rscript scripts/hsls/02_clean.R
 #
-# inputs/public/raw/hsls_crosswalk.csv drives every step: which NCES variables
-# to keep, missing-value codes, recodes, and the new names. The Python and
-# Stata projects keep the same crosswalk, so all three build the same file.
+# shared/data_spec/hsls.csv drives every step: which NCES variables
+# to keep, missing-value codes, recodes, and the new names. The R, Python, and
+# Stata projects all read it, so all three build the same file.
 #
-# NCES marks missing values with negative reserve codes, and the crosswalk
-# splits them in two (see docs/missing-data.md):
+# NCES marks missing values with negative reserve codes, and the data spec
+# splits them in two (see shared/docs/missing-data.md):
 #
 # - missing: nonresponse (-9, -8, -4, ...). The question applied but went
 #   unanswered. Analyses impute these or model them.
@@ -28,32 +28,32 @@ library(framework)
 scaffold()
 
 # Read every cell as text and keep empty cells as "", not NA
-crosswalk <- data_read(
-  "inputs.public.raw.hsls_crosswalk",
+data_spec <- data_read(
+  "inputs.public.raw.hsls_data_spec",
   col_types = readr::cols(.default = "c"),
   na = character()
 )
 
 raw <- data_read(
   "inputs.private.raw.hsls_student",
-  col_select = unique(crosswalk$nces),
+  col_select = unique(data_spec$nces),
   col_types = readr::cols(STU_ID = "c", .default = "d")
 )
 
 clean <- tibble::tibble(.rows = nrow(raw))
-for (i in seq_len(nrow(crosswalk))) {
-  row <- crosswalk[i, ]
+for (i in seq_len(nrow(data_spec))) {
+  row <- data_spec[i, ]
   source <- raw[[row$nces]]
   # A blank cell is missing too, so a flag never reads it as an answer
-  missing <- source %in% crosswalk_codes(row$missing) | is.na(source)
-  skipped <- source %in% crosswalk_codes(row$skip)
+  missing <- source %in% data_spec_codes(row$missing) | is.na(source)
+  skipped <- source %in% data_spec_codes(row$skip)
 
   if (row$derive == "applies") {
     column <- ifelse(missing, NA_real_, as.numeric(!skipped))
   } else {
     column <- source
     column[missing | skipped] <- NA
-    column <- crosswalk_recode(column, row$recode)
+    column <- data_spec_recode(column, row$recode)
   }
 
   if (row$fill != "") {

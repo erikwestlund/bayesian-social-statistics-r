@@ -24,11 +24,11 @@ in the series.
 - This project cleans the data for the whole series. Each data set has a
   folder of numbered steps and a runner: `scripts/clean_els.R` runs
   `scripts/els/01_fetch.R` and `scripts/els/02_clean.R`, driven by
-  `inputs/public/raw/els_crosswalk.csv`, and the result lands in
+  `shared/data_spec/els.csv`, and the result lands in
   `inputs/private/final/els_clean.csv`. HSLS:09 follows the same pattern
   (`scripts/clean_hsls.R`, `scripts/hsls/`). The Python and Stata projects
   have the same steps (`scripts/els/*.py`, `do/els/*.do`) from the same
-  crosswalk, and must build the same values: compare each port's
+  data spec, and must build the same values: compare each port's
   `els_clean.csv` with this project's column by column after any change.
 - Data flow one way: from this project to the lab. The lab loads the cleaned
   files R writes. Never fetch data back from the lab.

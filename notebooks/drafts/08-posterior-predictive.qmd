@@ -55,8 +55,8 @@ clean <- data_read(
 hsls <- analysis_sample(clean)
 regression <- bayes_model("regression")
 # Read every cell as text and keep empty cells as "", not NA
-crosswalk <- data_read(
-  "inputs.public.raw.hsls_crosswalk",
+data_spec <- data_read(
+  "inputs.public.raw.hsls_data_spec",
   col_types = readr::cols(.default = "c"),
   na = character()
 )
@@ -272,7 +272,7 @@ the replicated means for the same students. Missing race is its own group.
 ```{r}
 #| label: race
 
-race_labels <- crosswalk_labels(crosswalk$labels[crosswalk$name == "w1_race"])
+race_labels <- data_spec_labels(data_spec$labels[data_spec$name == "w1_race"])
 race <- race_labels[as.character(hsls$w1_race)]
 race[is.na(race)] <- "Missing"
 race <- factor(race)

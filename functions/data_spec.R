@@ -1,7 +1,7 @@
-# Helpers for reading the HSLS:09 and ELS:2002 crosswalks (inputs/public/raw/*_crosswalk.csv)
+# Helpers for reading the HSLS:09 and ELS:2002 data specs (shared/data_spec/*.csv)
 
 # "-9;-8" as c(-9, -8). An empty cell gives no codes.
-crosswalk_codes <- function(text) {
+data_spec_codes <- function(text) {
   if (text == "") {
     return(numeric())
   }
@@ -9,7 +9,7 @@ crosswalk_codes <- function(text) {
 }
 
 # Recode x with pairs such as "1=0;2=1". Values not listed stay as they are.
-crosswalk_recode <- function(x, text) {
+data_spec_recode <- function(x, text) {
   if (text == "") {
     return(x)
   }
@@ -23,7 +23,7 @@ crosswalk_recode <- function(x, text) {
 # "1=City;2=Suburb" as c("1" = "City", "2" = "Suburb"). Look a value up with
 # its number as text, such as labels[as.character(2)]. An empty cell gives no
 # labels.
-crosswalk_labels <- function(text) {
+data_spec_labels <- function(text) {
   if (text == "") {
     return(character())
   }
@@ -39,20 +39,20 @@ crosswalk_labels <- function(text) {
 # - "Observed": the clean value is present
 # - "Nonresponse": the raw value is a nonresponse code or blank
 # - "Logical skip": the raw value is a logical-skip code
-# - "Outside the flag": the raw value is an answer, but the crosswalk's
+# - "Outside the flag": the raw value is an answer, but the data spec's
 #   within flag is not 1 for this student
 #
 # A flag built from a logical skip (derive = "applies") turns the skip into 0,
 # so its skips count as observed. raw and clean must hold the same students in
 # the same order.
-missing_reasons <- function(raw, clean, crosswalk) {
+missing_reasons <- function(raw, clean, data_spec) {
   reasons <- tibble::tibble(.rows = nrow(clean))
-  for (i in seq_len(nrow(crosswalk))) {
-    row <- crosswalk[i, ]
+  for (i in seq_len(nrow(data_spec))) {
+    row <- data_spec[i, ]
     source <- raw[[row$nces]]
     observed <- !is.na(clean[[row$name]])
-    nonresponse <- source %in% crosswalk_codes(row$missing) | is.na(source)
-    skipped <- source %in% crosswalk_codes(row$skip)
+    nonresponse <- source %in% data_spec_codes(row$missing) | is.na(source)
+    skipped <- source %in% data_spec_codes(row$skip)
     reasons[[row$name]] <- dplyr::case_when(
       observed ~ "Observed",
       nonresponse ~ "Nonresponse",

@@ -7,14 +7,14 @@ data:
   inputs:
     public:
       raw:
-        hsls_crosswalk:
-          path: inputs/public/raw/hsls_crosswalk.csv
+        hsls_data_spec:
+          path: shared/data_spec/hsls.csv
           type: csv
           description: >-
             New names for the HSLS:09 variables the series uses, with labels,
             recodes, value labels, and two groups of reserve codes: nonresponse
             (missing) and logical skips (skip). Flags mark the logical skips
-            that matter in this series. docs/missing-data.md explains the codes.
+            that matter in this series. shared/docs/missing-data.md explains the codes.
             The R, Python, and Stata projects keep identical copies.
         hsls_doc_base_year:
           path: inputs/public/raw/hsls_docs/2011328_1.pdf
@@ -49,15 +49,15 @@ data:
             2018-140). Table 38 lists the reserve codes in the 2016 file.
             Downloaded from https://nces.ed.gov/pubs2018/2018140.pdf. SHA-256
             d5a9bef3822b76a964bf5b1ddd095bfbbbea4eb87330a88eb1b050951f6e837b.
-        els_crosswalk:
-          path: inputs/public/raw/els_crosswalk.csv
+        els_data_spec:
+          path: shared/data_spec/els.csv
           type: csv
           description: >-
             New names for the ELS:2002 variables the series uses, with labels,
             recodes, value labels, and two groups of reserve codes: nonresponse
             (missing) and codes for a survey component that did not apply
-            (skip). docs/missing-data.md explains the codes. The names follow
-            the HSLS:09 crosswalk in bayesian-social-statistics-r.
+            (skip). shared/docs/missing-data.md explains the codes. The names follow
+            the HSLS:09 data spec.
             Extends the els-2002-r crosswalk with the 2012 variables (w4_).
         els_doc_base_year:
           path: inputs/public/raw/els_docs/2004405.pdf
@@ -146,17 +146,31 @@ data:
           type: csv
           locked: true
           description: ELS:2002 base-year and first follow-up school file, extracted from els_zip.
+        els_brr_zip:
+          path: inputs/private/raw/els/ELS_2002-12_PETS_v1_0_Student_BRR_CSV_Datasets.zip
+          locked: true
+          description: >-
+            ELS:2002 student BRR replicate weights, CSV, as downloaded from
+            https://nces.ed.gov/EDAT/Data/Zip/ELS_2002-12_PETS_v1_0_Student_BRR_CSV_Datasets.zip.
+            SHA-256 019002a44f547dc44f03df024939b27c001219f3af401c8a59fa21863f67ecc0.
+        els_brr:
+          path: inputs/private/raw/els/els_02_12_byf3stubrr_v1_0.csv
+          type: csv
+          locked: true
+          description: >-
+            ELS:2002 student replicate weights, extracted from els_brr_zip. One
+            row per sample member (16,197), keyed by STU_ID.
       final:
         hsls_clean:
           path: inputs/private/final/hsls_clean.csv
           type: csv
           description: >-
-            One row per HSLS:09 student with the crosswalk's variables under
+            One row per HSLS:09 student with the data spec's variables under
             their new names. Built by scripts/hsls/02_clean.R.
         els_clean:
           path: inputs/private/final/els_clean.csv
           type: csv
           description: >-
-            One row per ELS:2002 sample member with the crosswalk's variables
+            One row per ELS:2002 sample member with the data spec's variables
             under their new names. Built by scripts/els/02_clean.R.
             lab.phpstats.org loads this file.

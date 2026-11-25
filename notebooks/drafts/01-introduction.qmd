@@ -344,7 +344,7 @@ plot_dag(dag_clustering, dag_labels)
 - Model: varying intercepts by school, $a_{\text{school}[i]}$, with a shared
   prior. Partial pooling. Separating within- and between-school slopes is part
   of the step.
-- The crosswalk keeps the design's stratum and PSU; no school ID yet.
+- The data spec keeps the design's stratum and PSU; no school ID yet.
 
 #### Measurement error
 
